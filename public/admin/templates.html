@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Şablonları – SAP WA Bot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="d-flex">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <i class="bi bi-robot sidebar-logo"></i>
+      <div>
+        <div class="sidebar-title">SAP WA Bot</div>
+        <div class="sidebar-sub">Yönetim Paneli</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="/admin/approvers" class="nav-link"><i class="bi bi-people"></i> Onay Yetkilileri</a>
+      <a href="/admin/templates" class="nav-link active"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/settings"  class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" style="color:rgba(255,100,100,.7);text-decoration:none;font-size:.8rem">
+        <i class="bi bi-box-arrow-right me-1"></i>Çıkış Yap
+      </a>
+    </div>
+  </div>
+
+  <!-- İçerik -->
+  <div id="content">
+    <div class="page-header">
+      <h4><i class="bi bi-chat-square-text me-2" style="color:#6cb2eb"></i>WhatsApp Şablonları</h4>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createModal">
+        <i class="bi bi-plus-lg me-1"></i>Yeni Şablon
+      </button>
+    </div>
+
+    <div id="apiError" class="alert alert-warning d-none">
+      <i class="bi bi-exclamation-triangle me-2"></i>
+      <span id="apiErrorMsg"></span>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-list-ul me-2"></i>Kayıtlı Şablonlar</span>
+        <div class="d-flex gap-2 align-items-center">
+          <small class="text-muted" id="countBadge"></small>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadTemplates()">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th>Şablon Adı</th>
+              <th>Kategori</th>
+              <th>Dil</th>
+              <th>Durum</th>
+              <th style="width:80px">İşlem</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr class="loading-row"><td colspan="5"><span class="spinner-border spinner-border-sm me-2"></span>Yükleniyor...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mt-3 text-muted" style="font-size:.8rem">
+      <i class="bi bi-info-circle me-1"></i>
+      Şablonlar Meta'ya gönderilir ve onay süreci 1–5 iş günü sürebilir.
+    </div>
+  </div>
+</div>
+
+<!-- Yeni Şablon Modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-semibold">Yeni Şablon Oluştur</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="createAlert" class="alert alert-danger py-2 d-none"></div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">Şablon Adı <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="tplName"
+                   placeholder="satin_alma_onay" pattern="[a-z0-9_]+"
+                   title="Sadece küçük harf, rakam ve alt çizgi">
+            <div class="form-text">Küçük harf, rakam ve _ kullanın</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">Kategori <span class="text-danger">*</span></label>
+            <select class="form-select" id="tplCategory">
+              <option value="UTILITY">UTILITY</option>
+              <option value="MARKETING">MARKETING</option>
+              <option value="AUTHENTICATION">AUTHENTICATION</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">Dil <span class="text-danger">*</span></label>
+            <select class="form-select" id="tplLang">
+              <option value="tr">Türkçe (tr)</option>
+              <option value="en_US">İngilizce (en_US)</option>
+              <option value="ar">Arapça (ar)</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold small">Mesaj Gövdesi <span class="text-danger">*</span></label>
+            <textarea class="form-control" id="tplBody" rows="5"
+                      placeholder="Merhaba {{1}}, #{{2}} numaralı siparişiniz onay bekliyor. Toplam tutar: {{3}} TL."></textarea>
+            <div class="form-text">Değişkenler için {{1}}, {{2}} ... formatını kullanın</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold small">Alt Bilgi (Footer) <span class="text-muted">– opsiyonel</span></label>
+            <input type="text" class="form-control" id="tplFooter"
+                   placeholder="SAP Business One – Otomatik bildirim">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary btn-sm" id="createBtn" onclick="createTemplate()">
+          <i class="bi bi-send me-1"></i>Meta'ya Gönder
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sil Onay Modal -->
+<div class="modal fade" id="delModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4">
+        <i class="bi bi-exclamation-triangle text-danger" style="font-size:2rem"></i>
+        <div class="mt-2 fw-semibold">Bu şablonu silmek istiyor musunuz?</div>
+        <div class="text-muted small mt-1" id="delName"></div>
+        <div class="text-danger small mt-1">Bu işlem geri alınamaz!</div>
+      </div>
+      <div class="modal-footer justify-content-center">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-danger btn-sm" id="confirmDelBtn">
+          <i class="bi bi-trash me-1"></i>Sil
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const STATUS_STYLE = {
+  APPROVED: 'bg-success',
+  PENDING:  'bg-warning text-dark',
+  REJECTED: 'bg-danger',
+  PAUSED:   'bg-secondary',
+};
+const STATUS_LABEL = {
+  APPROVED: 'Onaylı',
+  PENDING:  'Beklemede',
+  REJECTED: 'Reddedildi',
+  PAUSED:   'Durduruldu',
+};
+const CAT_STYLE = {
+  UTILITY:        'bg-info text-dark',
+  MARKETING:      'bg-primary',
+  AUTHENTICATION: 'bg-secondary',
+};
+
+let pendingDelName = null;
+
+async function loadTemplates() {
+  document.getElementById('apiError').classList.add('d-none');
+  document.getElementById('tableBody').innerHTML =
+    '<tr class="loading-row"><td colspan="5"><span class="spinner-border spinner-border-sm me-2"></span>Yükleniyor...</td></tr>';
+
+  try {
+    const res  = await fetch('/admin/api/templates');
+    const data = await res.json();
+
+    if (!res.ok) {
+      document.getElementById('apiErrorMsg').textContent = data.error;
+      document.getElementById('apiError').classList.remove('d-none');
+      document.getElementById('tableBody').innerHTML =
+        '<tr><td colspan="5" class="text-center text-muted py-3">Şablonlar alınamadı</td></tr>';
+      return;
+    }
+
+    document.getElementById('countBadge').textContent = `${data.length} şablon`;
+
+    if (data.length === 0) {
+      document.getElementById('tableBody').innerHTML = `
+        <tr><td colspan="5">
+          <div class="empty-state">
+            <i class="bi bi-chat-square-text"></i>Henüz şablon yok
+          </div>
+        </td></tr>`;
+      return;
+    }
+
+    document.getElementById('tableBody').innerHTML = data.map(t => {
+      const st   = t.status || 'PENDING';
+      const cat  = t.category || '—';
+      const lang = t.language || '—';
+      return `
+        <tr>
+          <td><strong>${t.name}</strong></td>
+          <td><span class="badge badge-status ${CAT_STYLE[cat] || 'bg-secondary'}">${cat}</span></td>
+          <td><code style="font-size:.8rem">${lang}</code></td>
+          <td><span class="badge badge-status ${STATUS_STYLE[st] || 'bg-secondary'}">${STATUS_LABEL[st] || st}</span></td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="confirmDelete('${t.name}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
+  } catch {
+    document.getElementById('apiErrorMsg').textContent = 'Sunucuya bağlanılamadı';
+    document.getElementById('apiError').classList.remove('d-none');
+  }
+}
+
+async function createTemplate() {
+  const name     = document.getElementById('tplName').value.trim();
+  const category = document.getElementById('tplCategory').value;
+  const lang     = document.getElementById('tplLang').value;
+  const body     = document.getElementById('tplBody').value.trim();
+  const footer   = document.getElementById('tplFooter').value.trim();
+  const alertEl  = document.getElementById('createAlert');
+  const btn      = document.getElementById('createBtn');
+
+  alertEl.classList.add('d-none');
+  if (!name || !body) { alertEl.textContent = 'Şablon adı ve gövde zorunlu'; alertEl.classList.remove('d-none'); return; }
+  if (!/^[a-z0-9_]+$/.test(name)) { alertEl.textContent = 'Şablon adı sadece küçük harf, rakam ve _ içerebilir'; alertEl.classList.remove('d-none'); return; }
+
+  // Değişken sayısını bul
+  const varCount = (body.match(/\{\{\d+\}\}/g) || []).length;
+  const components = [{
+    type: 'BODY',
+    text: body,
+    ...(varCount > 0 ? {
+      example: { body_text: [Array.from({length: varCount}, (_, i) => `örnek${i+1}`)] }
+    } : {}),
+  }];
+  if (footer) components.push({ type: 'FOOTER', text: footer });
+
+  const payload = { name, category, language: lang, components };
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gönderiliyor...';
+
+  try {
+    const res  = await fetch('/admin/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { alertEl.textContent = data.error; alertEl.classList.remove('d-none'); return; }
+
+    bootstrap.Modal.getInstance(document.getElementById('createModal')).hide();
+    loadTemplates();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-send me-1"></i>Meta\'ya Gönder';
+  }
+}
+
+function confirmDelete(name) {
+  pendingDelName = name;
+  document.getElementById('delName').textContent = name;
+  new bootstrap.Modal(document.getElementById('delModal')).show();
+}
+
+document.getElementById('confirmDelBtn').addEventListener('click', async () => {
+  if (!pendingDelName) return;
+  await fetch(`/admin/api/templates/${pendingDelName}`, { method: 'DELETE' });
+  bootstrap.Modal.getInstance(document.getElementById('delModal')).hide();
+  pendingDelName = null;
+  loadTemplates();
+});
+
+loadTemplates();
+</script>
+</body>
+</html>

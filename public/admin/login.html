@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SAP WA Bot – Giriş</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="login-wrapper">
+  <div class="card login-card shadow-lg">
+
+    <div class="card-header">
+      <i class="bi bi-robot" style="font-size:2.4rem;color:#6cb2eb;display:block;margin-bottom:.6rem"></i>
+      <h5 class="mb-1 fw-bold">SAP WA Bot</h5>
+      <div style="color:rgba(255,255,255,.45);font-size:.8rem">Yönetim Paneli</div>
+    </div>
+
+    <div class="card-body">
+      <div id="alert" class="alert alert-danger py-2 d-none" role="alert"></div>
+
+      <form id="loginForm">
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Kullanıcı Adı</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-person"></i></span>
+            <input type="text" class="form-control" id="username" required autofocus autocomplete="username">
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="form-label fw-semibold small">Şifre</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+            <input type="password" class="form-control" id="password" required autocomplete="current-password">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" id="submitBtn">
+          <i class="bi bi-box-arrow-in-right me-2"></i>Giriş Yap
+        </button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const alertEl = document.getElementById('alert');
+  const btn = document.getElementById('submitBtn');
+  alertEl.classList.add('d-none');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Giriş yapılıyor...';
+
+  try {
+    const res = await fetch('/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+      }),
+    });
+    if (res.ok) {
+      window.location.href = '/admin';
+    } else {
+      const data = await res.json();
+      alertEl.textContent = data.error || 'Giriş başarısız';
+      alertEl.classList.remove('d-none');
+    }
+  } catch {
+    alertEl.textContent = 'Sunucuya bağlanılamadı';
+    alertEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-box-arrow-in-right me-2"></i>Giriş Yap';
+  }
+});
+</script>
+</body>
+</html>

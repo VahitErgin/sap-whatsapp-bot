@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onay Yetkilileri – SAP WA Bot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="d-flex">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <i class="bi bi-robot sidebar-logo"></i>
+      <div>
+        <div class="sidebar-title">SAP WA Bot</div>
+        <div class="sidebar-sub">Yönetim Paneli</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="/admin/approvers" class="nav-link active"><i class="bi bi-people"></i> Onay Yetkilileri</a>
+      <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/settings"  class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" style="color:rgba(255,100,100,.7);text-decoration:none;font-size:.8rem">
+        <i class="bi bi-box-arrow-right me-1"></i>Çıkış Yap
+      </a>
+    </div>
+  </div>
+
+  <!-- İçerik -->
+  <div id="content">
+    <div class="page-header">
+      <h4><i class="bi bi-people me-2" style="color:#6cb2eb"></i>Onay Yetkilileri</h4>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+        <i class="bi bi-plus-lg me-1"></i>Yeni Ekle
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-list-ul me-2"></i>Kayıtlı Yetkililer</span>
+        <small class="text-muted" id="countBadge"></small>
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Telefon</th>
+              <th>İsim / Unvan</th>
+              <th style="width:80px">İşlem</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr class="loading-row"><td colspan="4"><span class="spinner-border spinner-border-sm me-2"></span>Yükleniyor...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mt-3 text-muted" style="font-size:.8rem">
+      <i class="bi bi-info-circle me-1"></i>
+      Telefon numaraları ülke kodu dahil, + işareti olmadan girilmelidir. Örnek: <strong>905321234567</strong>
+    </div>
+  </div>
+</div>
+
+<!-- Yeni Ekle Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-semibold">Yeni Yetkili Ekle</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="addAlert" class="alert alert-danger py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Telefon Numarası</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-telephone"></i></span>
+            <input type="text" class="form-control" id="inputPhone"
+                   placeholder="905321234567" maxlength="15">
+          </div>
+          <div class="form-text">Ülke kodu dahil, + işareti olmadan</div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold small">İsim / Unvan</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-person"></i></span>
+            <input type="text" class="form-control" id="inputName" placeholder="Ahmet Yıldız">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary btn-sm" id="saveBtn" onclick="saveApprover()">
+          <i class="bi bi-check-lg me-1"></i>Kaydet
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sil Onay Modal -->
+<div class="modal fade" id="delModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4">
+        <i class="bi bi-exclamation-triangle text-danger" style="font-size:2rem"></i>
+        <div class="mt-2 fw-semibold">Bu yetkiliyi silmek istiyor musunuz?</div>
+        <div class="text-muted small mt-1" id="delName"></div>
+      </div>
+      <div class="modal-footer justify-content-center">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-danger btn-sm" id="confirmDelBtn">
+          <i class="bi bi-trash me-1"></i>Sil
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let approvers = [];
+let pendingDelPhone = null;
+
+async function loadApprovers() {
+  const res  = await fetch('/admin/api/approvers');
+  approvers  = await res.json();
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  document.getElementById('countBadge').textContent = `${approvers.length} kayıt`;
+
+  if (approvers.length === 0) {
+    tbody.innerHTML = `
+      <tr><td colspan="4">
+        <div class="empty-state">
+          <i class="bi bi-people"></i>
+          Henüz yetkili eklenmemiş
+        </div>
+      </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = approvers.map((a, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td><i class="bi bi-telephone-fill me-2 text-success"></i><strong>${a.phone}</strong></td>
+      <td>${a.name}</td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="confirmDelete('${a.phone}', '${a.name.replace(/'/g,"\\'")}')">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+async function saveApprover() {
+  const phone   = document.getElementById('inputPhone').value.trim();
+  const name    = document.getElementById('inputName').value.trim();
+  const alertEl = document.getElementById('addAlert');
+  const btn     = document.getElementById('saveBtn');
+
+  alertEl.classList.add('d-none');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/admin/api/approvers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alertEl.textContent = data.error; alertEl.classList.remove('d-none'); return; }
+
+    approvers = data;
+    renderTable();
+    bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
+    document.getElementById('inputPhone').value = '';
+    document.getElementById('inputName').value  = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function confirmDelete(phone, name) {
+  pendingDelPhone = phone;
+  document.getElementById('delName').textContent = `${name} (${phone})`;
+  new bootstrap.Modal(document.getElementById('delModal')).show();
+}
+
+document.getElementById('confirmDelBtn').addEventListener('click', async () => {
+  if (!pendingDelPhone) return;
+  const res  = await fetch(`/admin/api/approvers/${pendingDelPhone}`, { method: 'DELETE' });
+  approvers  = await res.json();
+  renderTable();
+  bootstrap.Modal.getInstance(document.getElementById('delModal')).hide();
+  pendingDelPhone = null;
+});
+
+// Enter ile kaydet
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('addModal').classList.contains('show')) {
+    saveApprover();
+  }
+});
+
+loadApprovers();
+</script>
+</body>
+</html>

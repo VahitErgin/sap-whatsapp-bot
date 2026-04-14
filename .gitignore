@@ -1,0 +1,22 @@
+# Bağımlılıklar
+node_modules/
+
+# Ortam değişkenleri (şifreler, token'lar)
+.env
+.env.local
+.env.*.local
+
+# Çalışma zamanı verisi (admin şifresi, onay yetkilileri)
+data/
+
+# Geliştirme yardımcı dosyaları
+test-sap.js
+all-src.txt
+
+# Log dosyaları
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
