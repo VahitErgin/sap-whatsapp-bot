@@ -31,7 +31,7 @@ Header: Cookie: B1SESSION=abc123
 
 ### Endpoint: `BusinessPartners`
 
-#### Tek cari sorgula
+#### Tek cari sorgula (bakiye dahil TÜM alanlar gelir — $select KULLANMA)
 ```
 GET /BusinessPartners('C001')
 ```
@@ -42,8 +42,8 @@ GET /BusinessPartners('C001')
 | CardCode | Cari kodu (PK) |
 | CardName | Cari adı |
 | CardType | cCustomer / cSupplier / cLead |
-| Balance | Güncel bakiye |
-| CurrentAccountBalance | Cari hesap bakiyesi |
+| Balance | Güncel bakiye (⚠️ $select ile istenemez, $select olmadan gelir) |
+| CurrentAccountBalance | Cari hesap bakiyesi (⚠️ $select ile istenemez) |
 | Phone1 | Telefon |
 | EmailAddress | E-posta |
 | Currency | Para birimi |
@@ -51,17 +51,25 @@ GET /BusinessPartners('C001')
 | DNoteBalance | İrsaliye bakiyesi |
 | OrdersBal | Sipariş bakiyesi |
 
-#### Müşterileri listele
+> ⚠️ ÖNEMLİ: Balance ve CurrentAccountBalance alanları $select parametresinde kullanılamaz.
+> Bakiye sorgulamak için $select KULLANMA, tüm entity'yi getir.
+
+#### Müşterileri listele (sadece güvenli alanlar $select'te)
 ```
-GET /BusinessPartners?$filter=CardType eq 'cCustomer'&$select=CardCode,CardName,Balance
+GET /BusinessPartners?$filter=CardType eq 'cCustomer'&$select=CardCode,CardName,CardType,Currency
 ```
 
 #### Tedarikçileri listele
 ```
-GET /BusinessPartners?$filter=CardType eq 'cSupplier'&$select=CardCode,CardName,Balance
+GET /BusinessPartners?$filter=CardType eq 'cSupplier'&$select=CardCode,CardName,CardType,Currency
 ```
 
-#### Bakiyesi olan cariler
+#### Belirli carinin bakiyesi ($select OLMADAN sorgula)
+```
+GET /BusinessPartners('C001')
+```
+
+#### Bakiyesi olan cariler ($filter'da Balance kullanılabilir, $select'te değil)
 ```
 GET /BusinessPartners?$filter=Balance ne 0&$orderby=Balance desc&$top=20
 ```

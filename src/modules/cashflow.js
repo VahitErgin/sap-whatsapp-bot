@@ -147,7 +147,7 @@ async function buildQueryPlan(question) {
   const response = await axios.post(
     'https://api.anthropic.com/v1/messages',
     {
-      model:      'claude-sonnet-4-20250514',
+      model:      'claude-sonnet-4-6',
       max_tokens: 1024,
       system:     QUERY_PLANNER_PROMPT,
       messages: [{ role: 'user', content: question }],
@@ -229,7 +229,7 @@ Bu veriyi kullanıcıya WhatsApp mesajı olarak formatla.`;
   const response = await axios.post(
     'https://api.anthropic.com/v1/messages',
     {
-      model:      'claude-sonnet-4-20250514',
+      model:      'claude-sonnet-4-6',
       max_tokens: 1024,
       system:     FORMATTER_PROMPT,
       messages: [{ role: 'user', content: userMessage }],

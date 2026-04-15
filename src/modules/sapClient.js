@@ -168,7 +168,14 @@ class SLConnection {
   // ─────────────────────────────────────────────────────────
   async _handleError(err, method, resource) {
     const status = err.response?.status;
-    const sapMsg = err.response?.data?.error?.message?.value || err.message;
+    // OData v3: message.value | OData v4: message (string) | fallback: axios mesajı
+    const errData = err.response?.data;
+    const sapMsg  = errData?.error?.message?.value   // OData v3
+                 || errData?.error?.message           // OData v4
+                 || err.message;
+
+    // Tam hata detayını logla (teşhis için)
+    if (errData) console.error(`[SAP] Hata detayı:`, JSON.stringify(errData).substring(0, 500));
 
     // 401 → session süresi dolmuş, cookie sıfırla
     if (status === 401) {
@@ -179,7 +186,7 @@ class SLConnection {
     }
 
     console.error(`[SAP] ${method} ${resource} → ${status}: ${sapMsg}`);
-    throw new Error(sapMsg || 'SAP Service Layer hatası');
+    throw new Error(typeof sapMsg === 'string' ? sapMsg : JSON.stringify(sapMsg));
   }
 
   // ─────────────────────────────────────────────────────────
