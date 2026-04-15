@@ -8,6 +8,7 @@ const { requireAuth }                      = require('./authMiddleware');
 const { readApprovers, addApprover, removeApprover } = require('./approverService');
 const { listTemplates, createTemplate, deleteTemplate } = require('./templateService');
 const { getConnection }                    = require('../modules/sapClient');
+const { readEnv, updateEnv }               = require('./configService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -169,6 +170,39 @@ router.delete('/api/templates/:name', requireAuth, async (req, res) => {
     const msg = err.response?.data?.error?.message || err.message;
     res.status(500).json({ error: msg });
   }
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Uygulama Ayarları (WA token, API key vb.)
+// ─────────────────────────────────────────────────────────────
+
+router.get('/api/settings', requireAuth, (req, res) => {
+  const env = readEnv();
+  res.json({
+    WA_PHONE_NUMBER_ID:    env.WA_PHONE_NUMBER_ID || '',
+    WA_VERIFY_TOKEN:       env.WA_VERIFY_TOKEN    || '',
+    WA_ACCESS_TOKEN_SET:   !!env.WA_ACCESS_TOKEN,
+    ANTHROPIC_API_KEY_SET: !!env.ANTHROPIC_API_KEY,
+  });
+});
+
+router.post('/api/settings', requireAuth, (req, res) => {
+  const allowed = ['WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY'];
+  const updates = {};
+  for (const key of allowed) {
+    if (req.body[key]) updates[key] = req.body[key];
+  }
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'Güncellenecek alan yok' });
+
+  updateEnv(updates);
+
+  // Runtime'da config nesnesini güncelle (yeniden başlatma gerektirmez)
+  if (updates.WA_ACCESS_TOKEN)    config.whatsapp.accessToken   = updates.WA_ACCESS_TOKEN;
+  if (updates.WA_PHONE_NUMBER_ID) config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
+  if (updates.WA_VERIFY_TOKEN)    config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
+  if (updates.ANTHROPIC_API_KEY)  config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
+
+  res.json({ ok: true });
 });
 
 // ─────────────────────────────────────────────────────────────
