@@ -196,6 +196,65 @@
 
 ---
 
+## Teknik Servis
+
+### Senaryo S1 – Müşteri Servis Çağrıları
+**Kullanıcı:** "MB00001 müşterisinin servis çağrıları" / "MB00001'in teknik servisleri"
+**Claude yapacağı:**
+- endpoint: SQL_HIZMET, params: { cardCode: "MB00001" }
+- Çağrı no, ürün, durum, tarih bilgisini listele
+
+---
+
+### Senaryo S2 – Seri No ile Sorgula
+**Kullanıcı:** "4607123S10190 seri nolu cihazın durumu nedir?"
+**Claude yapacağı:**
+- endpoint: SQL_HIZMET, params: { serialNo: "4607123S10190" }
+- Cihaza ait tüm servis geçmişini getir
+
+---
+
+### Senaryo S3 – Çağrı Numarası ile Sorgula
+**Kullanıcı:** "14 numaralı servis çağrısı nerede?"
+**Claude yapacağı:**
+- endpoint: SQL_HIZMET, params: { callId: "14" }
+- Durum, çözüm, teslimat bilgisini göster
+
+---
+
+### Senaryo S4 – Açık Servis Çağrıları
+**Kullanıcı:** "Açık servis çağrıları neler?" / "Bekleyen teknik servisler"
+**Claude yapacağı:**
+- endpoint: SQL_HIZMET, params: { statusFilter: "open", top: "20" }
+- Müşteri, seri no, ürün, açılış tarihi, durum listele
+
+---
+
+### Senaryo S5 – Müşterinin Açık Servisleri
+**Kullanıcı:** "MB00001'in açık servis çağrıları var mı?"
+**Claude yapacağı:**
+- endpoint: SQL_HIZMET, params: { cardCode: "MB00001", statusFilter: "open" }
+
+**Örnek Yanıt:**
+```
+🔧 MB00001 Açık Servis Çağrıları
+
+📋 Çağrı #6 — A-DATA SSD 240GB
+   Seri: 2J3720104038
+   Açılış: 04 Ocak 2022
+   Durum: Müşteriye Sevk
+   Teslimat: ENT2022000000081
+
+📋 Çağrı #14 — AMD CPU RYZEN 3
+   Seri: 4607123S10190
+   Açılış: 10 Ocak 2022
+   Durum: Müşteriye Sevk
+
+Toplam: 2 açık çağrı
+```
+
+---
+
 ## Satın Alma / Onay
 
 ### Senaryo 14 – Bekleyen Onaylar

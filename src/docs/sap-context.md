@@ -329,6 +329,45 @@ cardType: C = müşteri, S = tedarikçi
 
 ---
 
+## Teknik Servis / Hizmet Çağrıları
+
+### View: `BE1_B2BLASTHIZMETSTATUS` (Direkt SQL)
+### SAP Tablosu: `OSCL` (Service Calls)
+
+> Servis çağrısı sorguları için endpoint: `SQL_HIZMET`
+
+#### View alanları
+| Alan | Açıklama |
+|------|----------|
+| customer | Müşteri kodu (CardCode) |
+| srvcCallID | Servis çağrı numarası |
+| internalSN | Ürün seri numarası |
+| itemName | Ürün adı |
+| GelenBelge | Gelen belge numarası |
+| BelgeTarih | Belge tarihi |
+| KargoNo | Gelen kargo numarası |
+| AdresSube | Şube/adres |
+| createDate | Çağrı açılış tarihi |
+| Cozum | Çözüm tipi (Upgrade, Sağlam vb.) |
+| Durum | Güncel durum (Müşteriye Sevk, Tamirde vb.) |
+| TeslimBelgeNo | Teslimat belge numarası |
+| TeslimTarihi | Teslimat tarihi |
+| TeslimKargo | Teslimat kargo numarası |
+| status | Durum kodu (-1=Açık, 0=Kapalı) |
+| Telephone | Müşteri telefonu |
+| Aciklama | Notlar/açıklama |
+
+#### Kullanım örnekleri (params)
+```json
+{ "cardCode": "MB00001" }                          → Müşterinin tüm çağrıları
+{ "serialNo": "4607123S10190" }                    → Seri no ile ara
+{ "callId": "14" }                                 → Çağrı numarası ile ara
+{ "cardCode": "MB00001", "statusFilter": "open" }  → Müşterinin açık çağrıları
+{ "statusFilter": "open", "top": "10" }            → Son 10 açık çağrı
+```
+
+---
+
 ## Hesap Planı
 
 ### Endpoint: `ChartOfAccounts`

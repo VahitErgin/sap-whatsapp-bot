@@ -61,6 +61,11 @@ YANIT FORMATI (sadece JSON):
 - "Hangi ürünlerin stoğu az" → cashflow
 - "Fatura listesi" → cashflow
 - "Son faturaları getir" → cashflow
+- "MB00006 müşterisinin servis çağrıları" → cashflow
+- "Açık servis çağrıları" → cashflow
+- "SN12345 seri nolu cihazın durumu" → cashflow
+- "Teknik servis durumu" → cashflow
+- "Hizmet çağrısı 14 nedir" → cashflow
 - "Bekleyen siparişler neler" → cashflow (listeleme)
 - "Bekleyen siparişlerden 5 tanesi ver" → cashflow (listeleme)
 - "Açık satın alma siparişleri" → cashflow (listeleme)

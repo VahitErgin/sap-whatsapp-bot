@@ -21,8 +21,8 @@ const axios  = require('axios');
 const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
-const { getConnection }              = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler } = require('./sapDb');
+const { getConnection }                             = require('./sapClient');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu } = require('./sapDb');
 const { sendText }                   = require('../services/whatsappService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
@@ -85,13 +85,23 @@ KRİTİK KURALLAR (asla ihlal etme):
 Tek cari bakiye / ekstre / yürüyen bakiye:
   endpoint: "SQL_CARI_EKSTRE"
   params: { "cardCode": "CARDCODE", "refDate": "YYYY-MM-DD" }
-  → OJDT+JDT1 join ile waterfall hesabı yapar, açık kalemleri döndürür
   → Kullanım: "... bakiyesi", "... hesap durumu", "... borcu ne kadar", "... alacağı"
 
 Tüm carilerin bakiye özeti:
   endpoint: "SQL_VADESI_GECENLER"
   params: { "refDate": "YYYY-MM-DD", "cardType": "C" }
   → cardType: C=müşteri, S=tedarikçi
+
+Teknik servis / hizmet çağrısı sorguları:
+  endpoint: "SQL_HIZMET"
+  params: {
+    "cardCode": "CARDCODE",      (opsiyonel - müşteri kodu ile filtrele)
+    "serialNo": "SN123",         (opsiyonel - seri no ile filtrele)
+    "callId": "14",              (opsiyonel - çağrı numarası ile filtrele)
+    "statusFilter": "open",      (opsiyonel - "open"=açık, "closed"=kapalı, boş=hepsi)
+    "top": "10"                  (opsiyonel - kaç kayıt, default 20)
+  }
+  → Kullanım: "servis çağrıları", "hizmet durumu", "teknik servis", "seri no ile sorgula", "açık servisler"
 
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
@@ -231,10 +241,20 @@ async function executeQueries(sl, queries, dbName) {
         });
         data = rows;
       } else if (q.endpoint === 'SQL_VADESI_GECENLER') {
-        // Direkt SQL: Tüm carilerin vadesi geçen bakiyesi
         const rows = await getVadesiGecenler({
           refDate:  q.params.refDate,
           cardType: q.params.cardType || 'C',
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_HIZMET') {
+        // Direkt SQL: BE1_B2BLASTHIZMETSTATUS view
+        const rows = await getHizmetDurumu({
+          cardCode:     q.params.cardCode     || null,
+          serialNo:     q.params.serialNo     || null,
+          callId:       q.params.callId       || null,
+          statusFilter: q.params.statusFilter || null,
+          top:          parseInt(q.params.top) || 20,
           dbName,
         });
         data = rows;

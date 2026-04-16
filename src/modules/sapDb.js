@@ -235,4 +235,69 @@ async function getVadesiGecenler({ refDate, cardType, dbName }) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler };
+// ─────────────────────────────────────────────────────────────
+// Teknik Servis Hizmet Çağrıları — BE1_B2BLASTHIZMETSTATUS view
+//
+// Parametreler (hepsi opsiyonel, en az biri verilmeli):
+//   cardCode   → müşteri kodu (customer)
+//   serialNo   → seri no (internalSN)
+//   callId     → servis çağrı no (srvcCallID)
+//   statusFilter → 'open' | 'closed' | null (hepsi)
+//   top        → kaç kayıt (default 20)
+// ─────────────────────────────────────────────────────────────
+async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top = 20, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('Top', sql.Int, top);
+
+  const conditions = [];
+
+  if (cardCode) {
+    request.input('CardCode', sql.NVarChar(50), cardCode);
+    conditions.push('customer = @CardCode');
+  }
+  if (serialNo) {
+    request.input('SerialNo', sql.NVarChar(50), `%${serialNo}%`);
+    conditions.push('internalSN LIKE @SerialNo');
+  }
+  if (callId) {
+    request.input('CallId', sql.Int, parseInt(callId));
+    conditions.push('srvcCallID = @CallId');
+  }
+  if (statusFilter === 'open') {
+    conditions.push("status = -1");   // -1 = açık
+  } else if (statusFilter === 'closed') {
+    conditions.push("status = 0");    // 0 = kapalı
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const query = `
+    SELECT TOP (@Top)
+      customer        AS Musteri,
+      srvcCallID      AS CagriNo,
+      internalSN      AS SeriNo,
+      itemName        AS UrunAdi,
+      GelenBelge      AS GelenBelge,
+      BelgeTarih      AS BelgeTarihi,
+      KargoNo         AS GelenKargo,
+      AdresSube       AS Sube,
+      createDate      AS AcilisTarihi,
+      Cozum           AS Cozum,
+      Durum           AS Durum,
+      TeslimBelgeNo   AS TeslimBelge,
+      TeslimTarihi    AS TeslimTarihi,
+      TeslimKargo     AS TeslimKargo,
+      status          AS StatusKod,
+      Telephone       AS Telefon,
+      Aciklama        AS Aciklama
+    FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
+    ${where}
+    ORDER BY createDate DESC
+  `;
+
+  const result = await request.query(query);
+  return result.recordset;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu };
