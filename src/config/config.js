@@ -30,6 +30,13 @@ module.exports = {
     apiKey: required('ANTHROPIC_API_KEY'),
   },
 
+  sapDb: {
+    server:   process.env.SAP_DB_SERVER   || '',
+    database: process.env.SAP_DB_NAME     || '',
+    user:     process.env.SAP_DB_USER     || '',
+    password: process.env.SAP_DB_PASSWORD || '',
+  },
+
   // Satın alma onayı yapabilecek telefon numaraları (başında ülke kodu, + yok)
   approverPhones: (process.env.APPROVER_PHONES || '').split(',').map(p => p.trim()).filter(Boolean),
 

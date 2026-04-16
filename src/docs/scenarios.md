@@ -59,11 +59,40 @@
 
 ---
 
-### Senaryo 4 – Vadesi Geçmiş Alacaklar
-**Kullanıcı:** "Vadesi geçmiş alacaklarımız ne kadar?"
+### Senaryo 4 – Vadesi Geçmiş Alacaklar (Fatura Bazlı)
+**Kullanıcı:** "Vadesi geçmiş alacaklarımız ne kadar?" / "Vadesi geçenler" / "Gecikmiş faturalar"
 **Claude yapacağı:**
-- `Invoices` → `DocDueDate lt bugün` filtresi ile açık faturaları getir
-- Toplam ve cari bazında özetle
+- `Invoices?$filter=DocDueDate lt 'BUGÜN' and DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'`
+- `$select=DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,PaidToDate`
+- `$orderby=DocDueDate asc`
+- Toplam tutarı hesapla, cari bazında özetle, kaç gün geciktiğini göster
+
+**Örnek Yanıt:**
+```
+⚠️ Vadesi Geçmiş Alacaklar
+
+• ABC Ltd   Fatura #1234  Vade: 01.03  45.000 TL  (46 gün)
+• XYZ AŞ   Fatura #1289  Vade: 15.03  30.000 TL  (32 gün)
+• DEF Ltd   Fatura #1301  Vade: 20.03  12.500 TL  (27 gün)
+
+💰 Toplam: 87.500 TL  |  3 fatura
+```
+
+> ⚠️ Bu sorgu Invoices tablosuna dayanır, hızlı çalışır.
+> Tek bir cari için detaylı waterfall bakiye hesabı istiyorsan "C001 carisinin altın ok bakiyesi" de.
+
+---
+
+### Senaryo 4b – Tüm Carilerin Bakiye Özeti
+**Kullanıcı:** "Bakiyesi olan müşterileri listele" / "En çok borçlu müşteriler"
+**Claude yapacağı:**
+- `BusinessPartners?$filter=Balance gt 0 and CardType eq 'cCustomer'`
+- `$orderby=Balance desc&$top=20`
+- NOT: $select KULLANMA (Balance $select ile istenemez)
+- Bu SAP'ın anlık bakiyesidir, waterfall hesabı DEĞİLDİR
+
+> ⚠️ Tüm cariler için waterfall (altın ok) hesabı YAPMA — çok ağır, sistem yorulur.
+> Waterfall hesabı sadece tek cari için yapılır (Senaryo 6b).
 
 ---
 
@@ -76,10 +105,37 @@
 
 ---
 
-### Senaryo 6 – Cari Bakiye
+### Senaryo 6 – Cari Bakiye (Anlık)
 **Kullanıcı:** "S002 tedarikçisine ne kadar borcumuz var?"
 **Claude yapacağı:**
-- `BusinessPartners('S002')` → Balance alanını getir
+- `BusinessPartners('S002')` → Balance alanını getir ($select KULLANMA)
+
+---
+
+### Senaryo 6b – Cari Hesap Ekstresi (Tarihe Göre — Altın Ok Mantığı)
+**Kullanıcı:** "MB00006 carisinin 31.03.2025 tarihine kadar bakiyesini hesapla"
+**Kullanıcı (tarihsiz):** "C001 carisinin bugünkü bakiyesi" / "altın ok bakiyesi"
+
+**Claude yapacağı:**
+1. Tarih belirtilmişse onu kullan, belirtilmemişse BUGÜNÜN tarihini kullan
+2. **Sorgu 1 (Borçlar)**: `Invoices?$filter=CardCode eq 'CARDCODE' and DocDate le 'YYYY-MM-DD'&$orderby=DocDueDate asc`
+3. **Sorgu 2 (Tahsilatlar)**: `IncomingPayments?$filter=CardCode eq 'CARDCODE' and DocDate le 'YYYY-MM-DD'&$orderby=DocDate asc`
+4. **Çek kuralı**: IncomingPayments içindeki PaymentChecks dizisinde DueDate > HedefTarih olan çek tutarlarını bakiyeye KATMA
+5. **Eşleştirme (Waterfall)**: Her tahsilatı en eski açık faturadan düş, kalan = bakiye
+6. Sonucu vade tarihine göre sıralı listele, toplam bakiye + bekleyen çekleri ayrıca göster
+> NOT: `JournalEntries?$expand=JournalEntryLines` bu SAP versiyonunda ÇALIŞMIYOR, kullanma
+
+**Örnek Yanıt:**
+```
+📊 MB00006 Cari Ekstresi (31.03.2025)
+
+📋 Açık Hareketler (Vadeye Göre):
+• 05.01 Fatura #1234  Vade: 05.02  45.000 TL
+• 15.02 Fatura #1289  Vade: 15.03  30.000 TL
+
+💰 Toplam Bakiye: 75.000 TL (Borçlu)
+⏳ Vadesi geçmemiş çek: 18.000 TL (vade: 15.04.2025 — henüz düşülmedi)
+```
 
 ---
 

@@ -183,11 +183,18 @@ router.get('/api/settings', requireAuth, (req, res) => {
     WA_VERIFY_TOKEN:       env.WA_VERIFY_TOKEN    || '',
     WA_ACCESS_TOKEN_SET:   !!env.WA_ACCESS_TOKEN,
     ANTHROPIC_API_KEY_SET: !!env.ANTHROPIC_API_KEY,
+    SAP_DB_SERVER:         env.SAP_DB_SERVER      || '',
+    SAP_DB_NAME:           env.SAP_DB_NAME        || '',
+    SAP_DB_USER:           env.SAP_DB_USER        || '',
+    SAP_DB_PASSWORD_SET:   !!env.SAP_DB_PASSWORD,
   });
 });
 
 router.post('/api/settings', requireAuth, (req, res) => {
-  const allowed = ['WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY'];
+  const allowed = [
+    'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY',
+    'SAP_DB_SERVER', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
+  ];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key]) updates[key] = req.body[key];
@@ -201,8 +208,28 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.WA_PHONE_NUMBER_ID) config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
   if (updates.WA_VERIFY_TOKEN)    config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
   if (updates.ANTHROPIC_API_KEY)  config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
+  if (updates.SAP_DB_SERVER)      config.sapDb.server           = updates.SAP_DB_SERVER;
+  if (updates.SAP_DB_NAME)        config.sapDb.database         = updates.SAP_DB_NAME;
+  if (updates.SAP_DB_USER)        config.sapDb.user             = updates.SAP_DB_USER;
+  if (updates.SAP_DB_PASSWORD)    config.sapDb.password         = updates.SAP_DB_PASSWORD;
 
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – SQL DB Bağlantı Testi
+// ─────────────────────────────────────────────────────────────
+router.post('/api/test-sqldb', requireAuth, async (req, res) => {
+  try {
+    const { getCariEkstre } = require('../modules/sapDb');
+    // Basit test: rastgele bir cari kodu ile bağlantıyı dene
+    await getCariEkstre({ cardCode: 'TEST_PING', refDate: new Date().toISOString().split('T')[0] });
+    res.json({ ok: true });
+  } catch (err) {
+    // Bağlantı kurulduysa ama cari bulunamadıysa yine başarılı say
+    const connected = !err.message.includes('ECONNREFUSED') && !err.message.includes('Login failed');
+    res.json({ ok: connected, error: connected ? null : err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────

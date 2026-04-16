@@ -20,9 +20,10 @@
 const axios  = require('axios');
 const fs     = require('fs');
 const path   = require('path');
-const config = require('../config/config');               // FIX: ../config/config
-const { getConnection } = require('./sapClient');
-const { sendText }      = require('../services/whatsappService'); // FIX: ../services/
+const config = require('../config/config');
+const { getConnection }              = require('./sapClient');
+const { getCariEkstre, getVadesiGecenler } = require('./sapDb');
+const { sendText }                   = require('../services/whatsappService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
 // ─── Dokümanları oku ──────────────────────────────────────────
@@ -69,11 +70,34 @@ YANIT FORMATI (sadece JSON, başka hiçbir şey yazma):
   "clarification_message": ""
 }
 
+KRİTİK KURALLAR (asla ihlal etme):
+1. Bakiye / borç / alacak / ekstre / cari hesap / yürüyen bakiye sorgularında
+   KESİNLİKLE "BusinessPartners", "Invoices", "IncomingPayments", "JournalEntries" KULLANMA.
+   Bu sorgular için SADECE endpoint: "SQL_CARI_EKSTRE" kullan.
+
+2. Tüm carilerin genel borç durumu için SADECE endpoint: "SQL_VADESI_GECENLER" kullan.
+
+3. "BusinessPartners" sadece cari arama (CardName, CardCode bulmak) için kullan.
+   Balance alanını HİÇBİR ZAMAN $select'e ekleme.
+
+ÖZEL SQL ENDPOİNTLERİ:
+
+Tek cari bakiye / ekstre / yürüyen bakiye:
+  endpoint: "SQL_CARI_EKSTRE"
+  params: { "cardCode": "CARDCODE", "refDate": "YYYY-MM-DD" }
+  → OJDT+JDT1 join ile waterfall hesabı yapar, açık kalemleri döndürür
+  → Kullanım: "... bakiyesi", "... hesap durumu", "... borcu ne kadar", "... alacağı"
+
+Tüm carilerin bakiye özeti:
+  endpoint: "SQL_VADESI_GECENLER"
+  params: { "refDate": "YYYY-MM-DD", "cardType": "C" }
+  → cardType: C=müşteri, S=tedarikçi
+
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
 - Eğer kullanıcıdan ek bilgi gerekiyorsa clarification_needed: true yap ve mesajı yaz
 - Parametre yoksa params: {} bırak
-- Tarih filtrelerinde BUGÜNÜN TARİHİNİ kullan
+- Tarih belirtilmemişse refDate: "${new Date().toISOString().split('T')[0]}" kullan
 - Sadece JSON döndür, açıklama ekleme`;
 
 // ─── Claude: Sonuçları formatla ───────────────────────────────
@@ -118,7 +142,7 @@ async function handleQuery({ from, question, dbName }) {
 
     // 3. SAP sorgularını çalıştır
     const sl      = getConnection(dbName || config.sap.companyDb);
-    const results = await executeQueries(sl, plan.queries);
+    const results = await executeQueries(sl, plan.queries, dbName || config.sap.companyDb);
 
     // 4. Claude ile sonuçları formatla
     const formatted = await formatResults(question, plan.queries, results);
@@ -141,55 +165,90 @@ async function getCashflow({ from, cardCode }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Claude: Sorgu planı oluştur
+// Claude: Sorgu planı oluştur (Haiku — hızlı ve düşük token)
 // ─────────────────────────────────────────────────────────────
-async function buildQueryPlan(question) {
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
-      model:      'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system:     QUERY_PLANNER_PROMPT,
-      messages: [{ role: 'user', content: question }],
-    },
-    {
-      headers: {
-        'x-api-key':         config.anthropic.apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type':      'application/json',
-      },
+async function buildQueryPlan(question, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model:      'claude-haiku-4-5-20251001',  // Planlama için Haiku yeterli
+          max_tokens: 512,
+          system:     QUERY_PLANNER_PROMPT,
+          messages: [{ role: 'user', content: question }],
+        },
+        {
+          headers: {
+            'x-api-key':         config.anthropic.apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type':      'application/json',
+          },
+          timeout: 30000,
+        }
+      );
+
+      const raw = response.data?.content
+        ?.filter(b => b.type === 'text')
+        ?.map(b => b.text)
+        ?.join('') || '{}';
+
+      const cleaned = raw.replace(/```json|```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 429 && attempt < retries) {
+        const wait = (attempt + 1) * 3000;
+        console.warn(`[Cashflow] 429 rate limit, ${wait}ms bekle (deneme ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      console.error('[Cashflow] Plan hatası:', err.response?.data || err.message);
+      throw new Error('Sorgu planı oluşturulamadı');
     }
-  );
-
-  const raw = response.data?.content
-    ?.filter(b => b.type === 'text')
-    ?.map(b => b.text)
-    ?.join('') || '{}';
-
-  try {
-    const cleaned = raw.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleaned);
-  } catch (err) {
-    console.error('[Cashflow] Plan parse hatası:', raw);
-    throw new Error('Sorgu planı oluşturulamadı');
   }
 }
 
 // ─────────────────────────────────────────────────────────────
 // SAP sorgularını çalıştır
+// SQL_ prefix'li endpoint'ler direkt DB'ye, diğerleri Service Layer'a gider
 // ─────────────────────────────────────────────────────────────
-async function executeQueries(sl, queries) {
+async function executeQueries(sl, queries, dbName) {
   const results = {};
 
   for (const q of queries) {
     try {
       console.log(`[Cashflow] SAP → ${q.endpoint}`, q.params);
-      const data = await sl.get(q.endpoint, q.params || {});
+
+      let data;
+
+      if (q.endpoint === 'SQL_CARI_EKSTRE') {
+        // Direkt SQL: JDT1 + OJDT + OCHH (waterfall bakiye)
+        const rows = await getCariEkstre({
+          cardCode: q.params.cardCode,
+          refDate:  q.params.refDate,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_VADESI_GECENLER') {
+        // Direkt SQL: Tüm carilerin vadesi geçen bakiyesi
+        const rows = await getVadesiGecenler({
+          refDate:  q.params.refDate,
+          cardType: q.params.cardType || 'C',
+          dbName,
+        });
+        data = rows;
+      } else {
+        // Service Layer (OData)
+        const res = await sl.get(q.endpoint, q.params || {});
+        data = res?.value || res || [];
+      }
+
       results[q.id] = {
         description: q.description,
         endpoint:    q.endpoint,
-        data:        data?.value || data || [],
-        count:       data?.value?.length ?? (data ? 1 : 0),
+        data:        Array.isArray(data) ? data : [data],
+        count:       Array.isArray(data) ? data.length : 1,
         error:       null,
       };
     } catch (err) {
@@ -210,7 +269,7 @@ async function executeQueries(sl, queries) {
 // ─────────────────────────────────────────────────────────────
 // Claude: Sonuçları WhatsApp formatına çevir
 // ─────────────────────────────────────────────────────────────
-async function formatResults(originalQuestion, queries, results) {
+async function formatResults(originalQuestion, queries, results, retries = 2) {
   const dataForClaude = queries.map(q => ({
     sorgu:  q.description,
     sonuc:  results[q.id]?.data,
@@ -218,35 +277,44 @@ async function formatResults(originalQuestion, queries, results) {
     hata:   results[q.id]?.error,
   }));
 
-  const userMessage = `
-Kullanıcı sorusu: "${originalQuestion}"
+  const userMessage = `Kullanıcı sorusu: "${originalQuestion}"\n\nSAP'tan gelen veriler:\n${JSON.stringify(dataForClaude, null, 2)}\n\nBu veriyi kullanıcıya WhatsApp mesajı olarak formatla.`;
 
-SAP'tan gelen veriler:
-${JSON.stringify(dataForClaude, null, 2)}
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model:      'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          system:     FORMATTER_PROMPT,
+          messages: [{ role: 'user', content: userMessage }],
+        },
+        {
+          headers: {
+            'x-api-key':         config.anthropic.apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type':      'application/json',
+          },
+          timeout: 30000,
+        }
+      );
 
-Bu veriyi kullanıcıya WhatsApp mesajı olarak formatla.`;
-
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
-      model:      'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system:     FORMATTER_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
-    },
-    {
-      headers: {
-        'x-api-key':         config.anthropic.apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type':      'application/json',
-      },
+      return response.data?.content
+        ?.filter(b => b.type === 'text')
+        ?.map(b => b.text)
+        ?.join('') || '⚠️ Sonuç formatlanamadı.';
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 429 && attempt < retries) {
+        const wait = (attempt + 1) * 3000;
+        console.warn(`[Cashflow] Formatter 429, ${wait}ms bekle (deneme ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      console.error('[Cashflow] Formatter hatası:', err.response?.data || err.message);
+      return '⚠️ Sonuç formatlanamadı.';
     }
-  );
-
-  return response.data?.content
-    ?.filter(b => b.type === 'text')
-    ?.map(b => b.text)
-    ?.join('') || '⚠️ Sonuç formatlanamadı.';
+  }
 }
 
 module.exports = { getCashflow, handleQuery };

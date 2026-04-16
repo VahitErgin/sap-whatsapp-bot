@@ -119,6 +119,51 @@
         </div>
       </div>
 
+      <!-- SQL Veritabanı -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-server me-2"></i>SAP SQL Veritabanı (Direkt Bağlantı)</div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">Sunucu</label>
+                <input type="text" class="form-control form-control-sm" id="sqlServer" placeholder="ENDEKSDC-02.endeks.local">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">Veritabanı Adı</label>
+                <input type="text" class="form-control form-control-sm" id="sqlDb" placeholder="TestEndeks011225">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label fw-semibold small">Kullanıcı</label>
+                <input type="text" class="form-control form-control-sm" id="sqlUser" placeholder="sa">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">
+                  Şifre
+                  <span class="text-muted fw-normal">(boş bırakırsan değişmez)</span>
+                </label>
+                <div class="input-group input-group-sm">
+                  <input type="password" class="form-control" id="sqlPassword" placeholder="••••••••">
+                  <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('sqlPassword',this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+                <div class="form-text" id="sqlPasswordStatus"></div>
+              </div>
+              <div class="col-12 d-flex gap-2 align-items-center">
+                <button class="btn btn-primary btn-sm" onclick="saveSqlSettings()">
+                  <i class="bi bi-floppy me-1"></i>SQL Ayarlarını Kaydet
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="testSqlDb()" id="testSqlBtn">
+                  <i class="bi bi-play-circle me-1"></i>Bağlantıyı Test Et
+                </button>
+                <span id="sqlTestResult"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Anthropic API -->
       <div class="col-md-6">
         <div class="card h-100">
@@ -211,6 +256,54 @@ async function loadSettings() {
     data.WA_ACCESS_TOKEN_SET ? '✓ Token kayıtlı (değiştirmek için yeni token gir)' : '⚠ Token tanımlı değil';
   document.getElementById('anthropicKeyStatus').textContent =
     data.ANTHROPIC_API_KEY_SET ? '✓ API Key kayıtlı (değiştirmek için yeni key gir)' : '⚠ API Key tanımlı değil';
+
+  document.getElementById('sqlServer').value = data.SAP_DB_SERVER || '';
+  document.getElementById('sqlDb').value     = data.SAP_DB_NAME   || '';
+  document.getElementById('sqlUser').value   = data.SAP_DB_USER   || '';
+  document.getElementById('sqlPasswordStatus').textContent =
+    data.SAP_DB_PASSWORD_SET ? '✓ Şifre kayıtlı (değiştirmek için yeni şifre gir)' : '⚠ Şifre tanımlı değil';
+}
+
+async function saveSqlSettings() {
+  const body = {
+    SAP_DB_SERVER: document.getElementById('sqlServer').value.trim(),
+    SAP_DB_NAME:   document.getElementById('sqlDb').value.trim(),
+    SAP_DB_USER:   document.getElementById('sqlUser').value.trim(),
+  };
+  const pw = document.getElementById('sqlPassword').value.trim();
+  if (pw) body.SAP_DB_PASSWORD = pw;
+
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showAlert('SQL veritabanı ayarları kaydedildi');
+    document.getElementById('sqlPassword').value = '';
+    loadSettings();
+  } else {
+    showAlert(data.error, 'danger');
+  }
+}
+
+async function testSqlDb() {
+  const btn    = document.getElementById('testSqlBtn');
+  const result = document.getElementById('sqlTestResult');
+  btn.disabled = true;
+  result.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const res  = await fetch('/admin/api/test-sqldb', { method: 'POST' });
+    const data = await res.json();
+    result.innerHTML = data.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>SQL bağlantısı başarılı</span>'
+      : `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${data.error}</span>`;
+  } catch {
+    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Sunucuya erişilemedi</span>';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function saveSettings() {

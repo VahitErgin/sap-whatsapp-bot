@@ -43,7 +43,6 @@ GET /BusinessPartners('C001')
 | CardName | Cari adı |
 | CardType | cCustomer / cSupplier / cLead |
 | Balance | Güncel bakiye (⚠️ $select ile istenemez, $select olmadan gelir) |
-| CurrentAccountBalance | Cari hesap bakiyesi (⚠️ $select ile istenemez) |
 | Phone1 | Telefon |
 | EmailAddress | E-posta |
 | Currency | Para birimi |
@@ -51,7 +50,7 @@ GET /BusinessPartners('C001')
 | DNoteBalance | İrsaliye bakiyesi |
 | OrdersBal | Sipariş bakiyesi |
 
-> ⚠️ ÖNEMLİ: Balance ve CurrentAccountBalance alanları $select parametresinde kullanılamaz.
+> ⚠️ ÖNEMLİ: Balance alanı $select parametresinde kullanılamaz.
 > Bakiye sorgulamak için $select KULLANMA, tüm entity'yi getir.
 
 #### Müşterileri listele (sadece güvenli alanlar $select'te)
@@ -230,16 +229,77 @@ GET /Items?$filter=contains(ItemName,'vida')
 
 ### Endpoint: `JournalEntries`
 
-#### Önemli alanlar
+OJDT (başlık) ve JDT1 (satırlar) tablolarına karşılık gelir.
+
+#### Başlık alanları (OJDT)
 | Alan | Açıklama |
 |------|----------|
 | JdtNum | Yevmiye numarası |
-| ReferenceDate | Tarih |
+| ReferenceDate | Belge tarihi |
+| DueDate | Vade tarihi |
 | Memo | Açıklama |
-| JournalEntryLines | Satırlar (array) |
-| JournalEntryLines.AccountCode | Hesap kodu |
-| JournalEntryLines.Debit | Borç |
-| JournalEntryLines.Credit | Alacak |
+| TransactionCode | İşlem kodu |
+| JournalEntryLines | Satırlar (JDT1, array) |
+
+#### Satır alanları — JournalEntryLines (JDT1)
+| Alan | Açıklama |
+|------|----------|
+| ShortName | **Cari kodu (CardCode)** — cari satırlarını bulmak için kullan |
+| AccountCode | Muhasebe hesap kodu |
+| Debit | Borç tutarı |
+| Credit | Alacak tutarı |
+| DueDate | **Vade/çek vadesi** — çek kontrolü için kritik |
+| TransType | İşlem tipi (aşağıya bak) |
+| LineMemo | Satır açıklaması |
+| Ref1 | Referans 1 (belge numarası) |
+
+#### TransType değerleri
+| Değer | Açıklama |
+|-------|----------|
+| 13 | Satış Faturası (A/R Invoice) |
+| 14 | Satış İade/Alacak Dekontu |
+| 18 | Alış Faturası (A/P Invoice) |
+| 19 | Alış İade/Borç Dekontu |
+| 24 | Gelen Ödeme / Tahsilat (IncomingPayment) |
+| 46 | Giden Ödeme (OutgoingPayment) |
+| 30 | Yevmiye Fişi (Manuel) |
+
+---
+
+## Cari Hesap Ekstresi / Bakiye (KRİTİK KURAL)
+
+> ⚠️ Bakiye, ekstre, borç/alacak, yürüyen bakiye sorgularında Service Layer KULLANMA.
+> `BusinessPartners`, `Invoices`, `IncomingPayments`, `JournalEntries` endpoint'leri bakiye için YASAK.
+
+### DOĞRU YÖNTEM: SQL_CARI_EKSTRE
+
+Sistem içinde tanımlı özel endpoint — OJDT + JDT1 tablolarını direkt sorgular:
+
+```json
+{
+  "endpoint": "SQL_CARI_EKSTRE",
+  "params": {
+    "cardCode": "MB00006",
+    "refDate": "2026-04-16"
+  }
+}
+```
+
+**Ne yapar:**
+- `OJDT INNER JOIN JDT1` ile cari tüm hareketleri çeker
+- Debit = borç, Credit = alacak (TRY); FCDebit/FCCredit = dövizli tutar
+- Çek kuralı: TransType=24 + OCHH join → vadesi gelmemiş çekler bakiyeye dahil edilmez
+- Waterfall eşleştirme: her alacak en eski borçtan düşülür
+- Sonuç: sadece açık kalan kalemler + toplam bakiye + bekleyen çek bilgisi
+
+**Tüm carilerin bakiye özeti için:**
+```json
+{
+  "endpoint": "SQL_VADESI_GECENLER",
+  "params": { "refDate": "2026-04-16", "cardType": "C" }
+}
+```
+cardType: C = müşteri, S = tedarikçi
 
 ---
 
@@ -308,6 +368,17 @@ GET /Items?$filter=contains(ItemName,'vida')
 | `contains(alan,'değer')` | İçerir |
 | `startswith(alan,'değer')` | İle başlar |
 
+### ⚠️ Tarih Filtreleme — KRİTİK KURAL
+SAP Service Layer'da `year()`, `month()`, `day()` OData fonksiyonları **ÇALIŞMAZ**.
+Tarih aralığı için her zaman `ge` / `le` kullan:
+
+| İstek | YANLIŞ ❌ | DOĞRU ✅ |
+|-------|-----------|----------|
+| 2025 yılı | `year(DocDate) eq 2025` | `DocDate ge '2025-01-01' and DocDate le '2025-12-31'` |
+| Bu ay | `month(DocDate) eq 4` | `DocDate ge '2025-04-01' and DocDate le '2025-04-30'` |
+| Bu hafta | `week(DocDate) eq ...` | `DocDate ge '2025-04-14' and DocDate le '2025-04-20'` |
+| Bugün | `DocDate eq today()` | `DocDate eq '2025-04-16'` |
+
 ---
 
 ## Nakit Akışı İçin Kritik Sorgular
@@ -325,5 +396,5 @@ GET /PurchaseInvoices?$filter=DocDueDate ge '2024-01-15' and DocDueDate le '2024
 
 ### Belirli carinin toplam açık alacağı
 ```
-GET /BusinessPartners('C001')?$select=CardName,Balance,CurrentAccountBalance
+GET /BusinessPartners('C001')
 ```

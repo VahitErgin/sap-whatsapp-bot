@@ -33,10 +33,16 @@ const INTENT_SYSTEM = `Sen SAP Business One WhatsApp asistanının yönlendirici
 Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini belirle.
 
 MODÜLLER:
-- "cashflow"  → SAP veri sorguları: bakiye, fatura, stok, nakit akışı, cari bilgisi, sipariş durumu, ödeme, tahsilat, raporlar
-- "approval"  → Satın alma onaylama/reddetme, bekleyen onay listesi
+- "cashflow"  → SAP veri sorguları ve listeleme: bakiye, fatura, stok, nakit akışı, cari bilgisi, sipariş listesi, ödeme, tahsilat, raporlar, veri görüntüleme
+- "approval"  → Satın alma SİPARİŞİ ONAYLAMA veya REDDETME aksiyonu (aksiyon kelimesi gerekir)
 - "support"   → SAP hata mesajları, nasıl yapılır soruları, menü yolları, teknik destek
 - "help"      → Genel yardım menüsü istekleri (yardım, menü, ne yapabilirsin gibi)
+
+KRİTİK AYRIMI — cashflow vs approval:
+- Kullanıcı sadece LİSTELEMEK / GÖRMEK istiyorsa → cashflow
+  Örnekler: "bekleyen siparişler", "siparişleri getir", "siparişleri göster", "açık siparişler"
+- Kullanıcı ONAYLAMAK veya REDDETMEK istiyorsa → approval
+  Örnekler: "siparişi onayla", "siparişi reddet", "onay ver", "onaylıyorum"
 
 YANIT FORMATI (sadece JSON):
 {
@@ -49,8 +55,11 @@ YANIT FORMATI (sadece JSON):
 - "C001 bakiyesi nedir" → cashflow
 - "Bu hafta vadesi gelen ödemeler" → cashflow
 - "Stokta vida var mı" → cashflow
-- "Onay bekleyen siparişler" → approval
-- "456 numaralı siparişi onayla" → approval
+- "Bekleyen siparişler neler" → cashflow (listeleme)
+- "Bekleyen siparişlerden 5 tanesi ver" → cashflow (listeleme)
+- "Açık satın alma siparişleri" → cashflow (listeleme)
+- "456 numaralı siparişi onayla" → approval (onay aksiyonu)
+- "Siparişi reddet" → approval (red aksiyonu)
 - "-10 hatası aldım" → support
 - "Fatura nasıl iptal edilir" → support
 - "Yardım" → help
