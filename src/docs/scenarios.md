@@ -18,6 +18,7 @@
 5. [Satın Alma / Onay](#satın-alma--onay)
 6. [SAP Destek / Hata Çözümü](#sap-destek--hata-çözümü)
 7. [Genel Yönetim Sorguları](#genel-yönetim-sorguları)
+8. [CRM — Aktivite / Fırsat / Aday Müşteri](#crm)
 
 ---
 
@@ -388,3 +389,105 @@ Toplam: 2 açık çağrı
 | Sipariş onaylama | ❌ | ✅ | ✅ |
 | Sipariş reddetme | ❌ | ✅ | ✅ |
 | Tüm cariler | ❌ | ❌ | ✅ |
+| CRM aktivite ekleme | ✅ | ✅ | ✅ |
+| Aday müşteri ekleme | ✅ | ✅ | ✅ |
+| Satış fırsatları | ✅ | ✅ | ✅ |
+
+---
+
+## CRM
+
+### Senaryo C1 – Aktivite Sorgulama
+**Kullanıcı:** "MB00001 müşterisinin son aktiviteleri" / "MB00001 ile ne zaman görüştük"
+**Claude yapacağı:**
+```json
+{ "endpoint": "Activities", "method": "GET",
+  "params": { "$filter": "CardCode eq 'MB00001'", "$orderby": "ActivityDate desc", "$top": "10",
+              "$select": "ActivityCode,ActivityDate,Subject,Notes,Action,Closed" } }
+```
+
+---
+
+### Senaryo C2 – Yeni Aktivite Ekle
+**Kullanıcı:** "MB00001'e aktivite ekle: bugün telefon görüşmesi yaptık, fiyat teklifi istediler"
+**Claude yapacağı:**
+```json
+{ "endpoint": "Activities", "method": "POST", "params": {},
+  "body": { "CardCode": "MB00001", "ActivityDate": "BUGÜN", "Subject": "Telefon görüşmesi",
+            "Notes": "Fiyat teklifi istediler", "Action": "phn", "Closed": "tNO" } }
+```
+
+**Örnek Yanıt:**
+```
+✅ Aktivite kaydedildi
+
+👤 MB00001
+📞 Telefon görüşmesi — 16 Nisan 2026
+📝 Fiyat teklifi istediler
+```
+
+---
+
+### Senaryo C3 – Yeni Aday Müşteri (Lead) Ekle
+**Kullanıcı:** "Yeni aday müşteri ekle: ABC Teknoloji, telefon 05321234567, ERP arıyor"
+**Claude yapacağı:**
+```json
+{ "endpoint": "BusinessPartners", "method": "POST", "params": {},
+  "body": { "CardName": "ABC Teknoloji", "CardType": "cLead",
+            "Phone1": "05321234567", "Notes": "ERP arıyor" } }
+```
+
+**Örnek Yanıt:**
+```
+✅ Aday müşteri oluşturuldu
+
+👤 ABC Teknoloji
+📞 05321234567
+📝 ERP arıyor
+🔑 Kod: L00042 (SAP tarafından atandı)
+```
+
+---
+
+### Senaryo C4 – Aday Müşterileri Listele
+**Kullanıcı:** "Aday müşterilerimiz kimler" / "Son leadler"
+**Claude yapacağı:**
+```json
+{ "endpoint": "BusinessPartners", "method": "GET",
+  "params": { "$filter": "CardType eq 'cLead'", "$orderby": "CardCode desc",
+              "$select": "CardCode,CardName,Phone1,EmailAddress", "$top": "20" } }
+```
+
+---
+
+### Senaryo C5 – Satış Fırsatları
+**Kullanıcı:** "Açık satış fırsatları neler" / "Bu ayki fırsatlar"
+**Claude yapacağı:**
+```json
+{ "endpoint": "SalesOpportunities", "method": "GET",
+  "params": { "$filter": "Status eq 'fn_Open'", "$orderby": "OpeningDate desc",
+              "$select": "SequentialNo,CardCode,CardName,OpportunityName,Potential,PredictedClosingDate",
+              "$top": "20" } }
+```
+
+---
+
+### Senaryo C6 – Yeni Satış Fırsatı Ekle
+**Kullanıcı:** "MB00001 için yeni fırsat ekle: Yazılım lisans yenileme, 50000 TL, Mayıs sonuna kadar"
+**Claude yapacağı:**
+```json
+{ "endpoint": "SalesOpportunities", "method": "POST", "params": {},
+  "body": { "CardCode": "MB00001", "OpportunityName": "Yazılım lisans yenileme",
+            "OpeningDate": "BUGÜN", "PredictedClosingDate": "2026-05-31",
+            "Status": "fn_Open", "Potential": 50000 } }
+```
+
+---
+
+### Senaryo C7 – Adayı Müşteriye Dönüştür
+**Kullanıcı:** "L00042 adayını müşteriye dönüştür"
+**Claude yapacağı:**
+```json
+{ "endpoint": "BusinessPartners('L00042')", "method": "PATCH", "params": {},
+  "body": { "CardType": "cCustomer" } }
+```

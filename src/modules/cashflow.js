@@ -56,19 +56,25 @@ YANIT FORMATI (sadece JSON, başka hiçbir şey yazma):
   "queries": [
     {
       "id": "q1",
-      "description": "Ne sorgulanıyor (Türkçe açıklama)",
+      "description": "Ne yapılıyor (Türkçe açıklama)",
       "endpoint": "Invoices",
+      "method": "GET",
       "params": {
         "$filter": "DocumentStatus eq 'bost_Open' and CardCode eq 'C001'",
         "$select": "DocNum,CardName,DocTotal,DocDueDate",
         "$orderby": "DocDueDate asc",
         "$top": "10"
-      }
+      },
+      "body": null
     }
   ],
   "clarification_needed": false,
   "clarification_message": ""
 }
+
+method: "GET" → veri çek (varsayılan)
+method: "POST" → yeni kayıt oluştur (body dolu olmalı, params boş)
+method: "PATCH" → güncelle (endpoint içinde key var: BusinessPartners('L00001'))
 
 KRİTİK KURALLAR (asla ihlal etme):
 1. Bakiye / borç / alacak / ekstre / cari hesap / yürüyen bakiye sorgularında
@@ -260,8 +266,19 @@ async function executeQueries(sl, queries, dbName) {
         data = rows;
       } else {
         // Service Layer (OData)
-        const res = await sl.get(q.endpoint, q.params || {});
-        data = res?.value || res || [];
+        const method = (q.method || 'GET').toUpperCase();
+        if (method === 'POST') {
+          const res = await sl.post(q.endpoint, q.body || {});
+          data = [res];
+        } else if (method === 'PATCH') {
+          // endpoint içinde key zaten var: BusinessPartners('L00001')
+          await sl._ensureSession();
+          const res = await sl._http.patch(q.endpoint, q.body || {}, { headers: sl._cookieHeader() });
+          data = [{ success: true, status: res.status }];
+        } else {
+          const res = await sl.get(q.endpoint, q.params || {});
+          data = res?.value || res || [];
+        }
       }
 
       results[q.id] = {

@@ -69,6 +69,11 @@ YANIT FORMATI (sadece JSON):
 - "Bekleyen siparişler neler" → cashflow (listeleme)
 - "Bekleyen siparişlerden 5 tanesi ver" → cashflow (listeleme)
 - "Açık satın alma siparişleri" → cashflow (listeleme)
+- "MB00001'e aktivite ekle, bugün telefon görüşmesi yaptık" → cashflow
+- "Yeni aday müşteri ekle: ABC Teknoloji, 05001234567" → cashflow
+- "Açık satış fırsatları" → cashflow
+- "MB00001'in aktiviteleri" → cashflow
+- "Yeni fırsat ekle" → cashflow
 - "456 numaralı siparişi onayla" → approval (onay aksiyonu)
 - "Siparişi reddet" → approval (red aksiyonu)
 - "-10 hatası aldım" → support

@@ -368,6 +368,119 @@ cardType: C = müşteri, S = tedarikçi
 
 ---
 
+## CRM — Aktiviteler
+
+### Endpoint: `Activities` (OCLG tablosuna karşılık gelir)
+
+#### Önemli alanlar
+| Alan | Açıklama |
+|------|----------|
+| ActivityCode | Aktivite ID (PK, otomatik) |
+| CardCode | Cari kodu |
+| CardName | Cari adı |
+| ActivityDate | Tarih (YYYY-MM-DD) |
+| ActivityTime | Saat (HH:MM) |
+| Subject | Konu |
+| Notes | Detaylı not |
+| Action | phn=Telefon, mtg=Toplantı, tsk=Görev, nts=Not, cmp=Kampanya, otr=Diğer |
+| Closed | tYES=Kapalı / tNO=Açık |
+| HandledBy | Kullanıcı kodu |
+| ContactPersonCode | İlgili kişi kodu |
+
+#### Aktivite sorgula
+```
+GET /Activities?$filter=CardCode eq 'MB00001'&$orderby=ActivityDate desc&$top=10
+```
+
+#### Yeni aktivite ekle (POST)
+```json
+POST /Activities
+{
+  "CardCode": "MB00001",
+  "ActivityDate": "2026-04-16",
+  "ActivityTime": "09:30",
+  "Subject": "Müşteri görüşmesi",
+  "Notes": "Fiyat teklifi sunuldu...",
+  "Action": "phn",
+  "Closed": "tNO"
+}
+```
+
+---
+
+## CRM — Satış Fırsatları
+
+### Endpoint: `SalesOpportunities` (OOPR tablosuna karşılık gelir)
+
+#### Önemli alanlar
+| Alan | Açıklama |
+|------|----------|
+| SequentialNo | Fırsat ID (PK, otomatik) |
+| CardCode | Cari kodu |
+| CardName | Cari adı |
+| OpportunityName | Fırsat adı/konusu |
+| SalesPerson | Satış temsilcisi kodu |
+| OpeningDate | Açılış tarihi |
+| PredictedClosingDate | Tahmini kapanış tarihi |
+| Status | fn_Open=Açık / fn_Won=Kazanıldı / fn_Lost=Kaybedildi |
+| Potential | Tahmini tutar |
+| WeightedSum | Ağırlıklı tutar |
+| Territory | Bölge |
+| Industry | Sektör |
+
+#### Açık fırsatları listele
+```
+GET /SalesOpportunities?$filter=Status eq 'fn_Open'&$orderby=OpeningDate desc&$top=20
+  &$select=SequentialNo,CardCode,CardName,OpportunityName,Potential,PredictedClosingDate
+```
+
+#### Yeni fırsat ekle (POST)
+```json
+POST /SalesOpportunities
+{
+  "CardCode": "MB00001",
+  "OpportunityName": "Yazılım lisans yenileme",
+  "OpeningDate": "2026-04-16",
+  "PredictedClosingDate": "2026-05-31",
+  "Status": "fn_Open",
+  "Potential": 50000
+}
+```
+
+---
+
+## CRM — Aday Müşteriler (Leads)
+
+### Endpoint: `BusinessPartners` (CardType=cLead)
+
+#### Yeni aday müşteri ekle (POST)
+```json
+POST /BusinessPartners
+{
+  "CardName": "ABC Teknoloji Ltd.",
+  "CardType": "cLead",
+  "Phone1": "02121234567",
+  "EmailAddress": "info@abc.com",
+  "Notes": "Fuardan tanıştık, ERP demo istedi"
+}
+```
+> CardCode boş bırakılırsa SAP otomatik atar.
+
+#### Aday müşterileri listele
+```
+GET /BusinessPartners?$filter=CardType eq 'cLead'
+  &$select=CardCode,CardName,Phone1,EmailAddress
+  &$orderby=CardCode desc&$top=20
+```
+
+#### Adayı müşteriye dönüştür (PATCH)
+```
+PATCH /BusinessPartners('L00001')
+{ "CardType": "cCustomer" }
+```
+
+---
+
 ## Hesap Planı
 
 ### Endpoint: `ChartOfAccounts`
