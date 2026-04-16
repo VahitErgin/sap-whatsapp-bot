@@ -197,19 +197,32 @@ POST /PurchaseOrders(DocEntry)/Reject
 
 ## Stok / Ürünler
 
-### Endpoint: `Items`
+### Endpoint: `Items` (OITM tablosuna karşılık gelir)
+
+> Stok sorgularında her zaman bu endpoint'i kullan. OITM = Items master.
 
 #### Önemli alanlar
 | Alan | Açıklama |
 |------|----------|
 | ItemCode | Ürün kodu (PK) |
 | ItemName | Ürün adı |
-| QuantityOnStock | Stok miktarı |
-| QuantityOnOrder | Siparişteki miktar |
+| QuantityOnStock | Toplam stok miktarı (tüm depolar) |
+| QuantityOnOrder | Açık siparişteki miktar |
 | AvgStdPrice | Ortalama maliyet |
 | SalesPrice | Satış fiyatı |
 | ItemType | itItems / itLabor / itTravel |
 | Frozen | tYES / tNO (pasif mi?) |
+
+> ⚠️ `SalesPrice` $select'e eklenebilir ama bazı SAP versiyonlarında hata verebilir.
+> Fiyat isteniyorsa sadece `AvgStdPrice` kullan.
+
+#### En yüksek stoktaki ürünler
+```
+GET /Items?$filter=Frozen eq 'tNO'
+  &$select=ItemCode,ItemName,QuantityOnStock
+  &$orderby=QuantityOnStock desc
+  &$top=10
+```
 
 #### Stokta azalan ürünler
 ```
@@ -220,8 +233,21 @@ GET /Items?$filter=QuantityOnStock lt 10 and Frozen eq 'tNO'
 
 #### Ürün ara
 ```
-GET /Items?$filter=contains(ItemName,'vida')
+GET /Items?$filter=contains(ItemName,'vida') and Frozen eq 'tNO'
+  &$select=ItemCode,ItemName,QuantityOnStock
 ```
+
+### Depo Hareketleri: `InventoryGenEntries` (OINM tablosuna karşılık gelir)
+
+OINM = tüm depo giriş/çıkış hareketleri.
+
+| Alan | Açıklama |
+|------|----------|
+| ItemCode | Ürün kodu |
+| Quantity | Hareket miktarı (+ giriş, - çıkış) |
+| DocDate | Hareket tarihi |
+| WarehouseCode | Depo kodu |
+| TransType | İşlem tipi |
 
 ---
 

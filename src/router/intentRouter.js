@@ -55,6 +55,12 @@ YANIT FORMATI (sadece JSON):
 - "C001 bakiyesi nedir" → cashflow
 - "Bu hafta vadesi gelen ödemeler" → cashflow
 - "Stokta vida var mı" → cashflow
+- "Stok bakiyesi en yüksekten 5 kalem getir" → cashflow
+- "En çok stokta olan ürünler" → cashflow
+- "Stok durumu listele" → cashflow
+- "Hangi ürünlerin stoğu az" → cashflow
+- "Fatura listesi" → cashflow
+- "Son faturaları getir" → cashflow
 - "Bekleyen siparişler neler" → cashflow (listeleme)
 - "Bekleyen siparişlerden 5 tanesi ver" → cashflow (listeleme)
 - "Açık satın alma siparişleri" → cashflow (listeleme)
@@ -62,8 +68,12 @@ YANIT FORMATI (sadece JSON):
 - "Siparişi reddet" → approval (red aksiyonu)
 - "-10 hatası aldım" → support
 - "Fatura nasıl iptal edilir" → support
+- "SAP'ta dönem nasıl kapatılır" → support
 - "Yardım" → help
-- "Ne yapabilirsin" → help`;
+- "Ne yapabilirsin" → help
+
+NOT: Kullanıcı "getir", "listele", "göster", "ver", "kaç tane" gibi kelimeler kullanıyorsa → cashflow.
+     Kullanıcı "nasıl", "nerede", "ne zaman", "hata" gibi kelimeler kullanıyorsa → support.`;
 
 // ─────────────────────────────────────────────────────────────
 // Ana yönlendirici
