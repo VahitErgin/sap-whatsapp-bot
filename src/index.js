@@ -7,6 +7,9 @@ const { handleIncoming } = require('./router/intentRouter');
 const adminRouter = require('./admin/adminRouter');
 
 const serviceNotifier = require('./jobs/serviceNotifier');
+const { logMessage }  = require('./services/messageLogger');
+const { transcribeVoice } = require('./services/voiceHandler');
+const { sendText }    = require('./services/whatsappService');
 
 const app = express();
 
@@ -60,22 +63,61 @@ app.post('/webhook', async (req, res) => {
     if (!value?.messages) return; // Okundu bildirimi vs. – atla
 
     const message = value.messages[0];
-    const from    = message.from;     // Gönderenin telefon numarası
-    const msgType = message.type;     // text | interactive | ...
+    const from    = message.from;
+    const msgType = message.type; // text | interactive | audio
 
-    // Sadece metin ve buton cevaplarını işle
+    // ── Sesli mesaj ────────────────────────────────────────────
+    if (msgType === 'audio') {
+      const mediaId = message.audio?.id;
+      if (!mediaId) return;
+
+      console.log(`[Mesaj] ${from}: [sesli mesaj] mediaId=${mediaId}`);
+      const t0 = Date.now();
+
+      try {
+        await sendText(from, '🎙️ Sesli mesajınız transkribe ediliyor...');
+        const transcribed = await transcribeVoice(mediaId);
+
+        if (!transcribed || transcribed.trim() === '') {
+          logMessage({ from, type: 'audio', text: '', error: 'transkripsiyon boş' });
+          return await sendText(from, '⚠️ Sesli mesajınız anlaşılamadı. Lütfen yazarak tekrar deneyin.');
+        }
+
+        console.log(`[Mesaj] ${from}: [sesli→metin] "${transcribed}"`);
+        await sendText(from, `🎙️ _"${transcribed}"_`); // Kullanıcıya ne anlaşıldığını göster
+
+        await handleIncoming({ from, text: transcribed, message, value });
+        logMessage({ from, type: 'audio', text: transcribed, processingMs: Date.now() - t0 });
+
+      } catch (err) {
+        console.error(`[Webhook] Sesli mesaj hatası (${from}):`, err.message);
+        logMessage({ from, type: 'audio', text: '', error: err.message });
+        await sendText(from, '⚠️ Sesli mesaj işlenirken hata oluştu. Lütfen yazarak deneyin.');
+      }
+      return;
+    }
+
+    // ── Metin ve buton cevapları ───────────────────────────────
     if (msgType !== 'text' && msgType !== 'interactive') return;
 
     const text = msgType === 'text'
       ? message.text.body.trim()
-      : message.interactive?.button_reply?.id ||  // Buton tıklaması
-        message.interactive?.list_reply?.id;       // Liste seçimi
+      : message.interactive?.button_reply?.id ||
+        message.interactive?.list_reply?.id;
 
     if (!text) return;
 
     console.log(`[Mesaj] ${from}: ${text}`);
+    const t0 = Date.now();
 
-    await handleIncoming({ from, text, message, value });
+    try {
+      await handleIncoming({ from, text, message, value });
+      logMessage({ from, type: msgType, text, processingMs: Date.now() - t0 });
+    } catch (err) {
+      logMessage({ from, type: msgType, text, error: err.message });
+      throw err;
+    }
+
   } catch (err) {
     console.error('[Webhook] İşleme hatası:', err.message);
   }
