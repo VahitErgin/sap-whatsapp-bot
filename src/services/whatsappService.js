@@ -66,6 +66,26 @@ async function sendMenu(to, text) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Template mesajı (business-initiated / proaktif bildirim)
+//
+// components: [{ type: 'text', text: '...' }, ...]  → body parametreleri
+// Örnek: sendTemplate('905001234567', 'servis_durum_guncelleme', 'tr',
+//          [{ type: 'text', text: '14' }, { type: 'text', text: 'Teslim Edildi' }])
+// ─────────────────────────────────────────────────────────────
+async function sendTemplate(to, templateName, language, components) {
+  return _send(to, {
+    type: 'template',
+    template: {
+      name:     templateName,
+      language: { code: language || 'tr' },
+      components: components && components.length ? [
+        { type: 'body', parameters: components },
+      ] : [],
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // Dahili gönderici
 // ─────────────────────────────────────────────────────────────
 async function _send(to, messagePayload) {
@@ -86,4 +106,4 @@ async function _send(to, messagePayload) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendList, sendMenu };
+module.exports = { sendText, sendButtons, sendList, sendMenu, sendTemplate };

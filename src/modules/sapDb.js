@@ -300,4 +300,32 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top =
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu };
+// ─────────────────────────────────────────────────────────────
+// Servis Bildirim Polling — Tüm servis çağrılarının anlık durumu
+//
+// Sadece serviceNotifier.js tarafından kullanılır.
+// Durum değişikliği karşılaştırması için tüm kayıtları döndürür.
+// ─────────────────────────────────────────────────────────────
+async function getServisGuncellemeleri({ dbName } = {}) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+
+  const query = `
+    SELECT TOP 500
+      srvcCallID  AS CagriNo,
+      customer    AS Musteri,
+      internalSN  AS SeriNo,
+      itemName    AS UrunAdi,
+      status      AS StatusKod,
+      Durum       AS Durum,
+      Telephone   AS Telefon,
+      createDate  AS AcilisTarihi
+    FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
+    ORDER BY createDate DESC
+  `;
+
+  const result = await request.query(query);
+  return result.recordset;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri };

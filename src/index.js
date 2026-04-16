@@ -6,6 +6,8 @@ const config      = require('./config/config');
 const { handleIncoming } = require('./router/intentRouter');
 const adminRouter = require('./admin/adminRouter');
 
+const serviceNotifier = require('./jobs/serviceNotifier');
+
 const app = express();
 
 // ── Statik dosyalar (admin paneli CSS/HTML) ────────────────────
@@ -86,4 +88,5 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 
 app.listen(config.port, () => {
   console.log(`[Sunucu] http://localhost:${config.port} üzerinde çalışıyor`);
+  serviceNotifier.start();
 });
