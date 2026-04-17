@@ -162,7 +162,7 @@ const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
-async function handleQuery({ from, question, dbName }) {
+async function handleQuery({ from, question, dbName, _skipFallback = false }) {
   if (!question || question.trim() === '') {
     return await sendText(from,
       '📊 *SAP Sorgulama*\n\nNe öğrenmek istersiniz?\n\nÖrnek:\n• _"C001 carisinin bakiyesi"_\n• _"Bu hafta vadesi gelen ödemeler"_\n• _"Stokta azalan ürünler"_'
@@ -179,7 +179,8 @@ async function handleQuery({ from, question, dbName }) {
     // 2. Ek bilgi gerekiyor mu?
     // Planner clarification istedi ama soru içinde isim/harf dizisi varsa
     // → direkt BusinessPartners'da cardName araması yap (hatalı clarification kurtarma)
-    if (plan.clarification_needed) {
+    // _skipFallback=true ise (cari seçimi sonrası) bu bloğu atla → sonsuz döngü önlenir
+    if (plan.clarification_needed && !_skipFallback) {
       const nameMatch = question.match(/([A-ZÇĞİÖŞÜa-zçğışöşü]{3,}(?:\s+[A-ZÇĞİÖŞÜa-zçğışöşü]{2,})*)/);
       if (nameMatch) {
         const cardName      = nameMatch[1].trim();
@@ -197,7 +198,7 @@ async function handleQuery({ from, question, dbName }) {
         const bpRes = fallback['q1'];
         if (bpRes?.count === 1) {
           const found = bpRes.data[0];
-          return handleQuery({ from, question: `${found.CardCode} : ${question}`, dbName });
+          return handleQuery({ from, question: `${found.CardCode} : ${question}`, dbName, _skipFallback: true });
         } else if (bpRes?.count > 1) {
           const records = bpRes.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
           _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
@@ -215,20 +216,21 @@ async function handleQuery({ from, question, dbName }) {
     const sl      = getConnection(dbName || config.sap.companyDb);
     const results = await executeQueries(sl, plan.queries, dbName || config.sap.companyDb);
 
-    // 4. Çoklu cari eşleşmesi? → liste göster, bekle
-    const multiMatch = Object.values(results).find(r => r.error === 'multiple_matches');
-    if (multiMatch) {
-      const cardName = plan.queries.find(q => q.params?.cardName)?.params?.cardName || '';
-      _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
-      return await sendCardSelectionList(from, multiMatch.data);
-    }
+    // 4. Çoklu cari eşleşmesi? → liste göster, bekle (seçim sonrası tekrar sorma)
+    if (!_skipFallback) {
+      const multiMatch = Object.values(results).find(r => r.error === 'multiple_matches');
+      if (multiMatch) {
+        const cardName = plan.queries.find(q => q.params?.cardName)?.params?.cardName || '';
+        _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+        return await sendCardSelectionList(from, multiMatch.data);
+      }
 
-    // 4b. BusinessPartners çoklu sonuç → seçim listesi (isimden arama yapıldıysa)
-    const bpMulti = Object.values(results).find(r => r.endpoint === 'BusinessPartners' && r.count > 1);
-    if (bpMulti) {
-      const records = bpMulti.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
-      _pending.set(from, { question, cardName: '', dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
-      return await sendCardSelectionList(from, records);
+      const bpMulti = Object.values(results).find(r => r.endpoint === 'BusinessPartners' && r.count > 1);
+      if (bpMulti) {
+        const records = bpMulti.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
+        _pending.set(from, { question, cardName: '', dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+        return await sendCardSelectionList(from, records);
+      }
     }
 
     // 5. Claude ile sonuçları formatla
@@ -285,7 +287,7 @@ async function handleCardSelection({ from, cardCode, cardName }) {
     : `${cardCode} için: ${pending.question}`;
 
   console.log(`[Cashflow] Cari seçildi: ${cardCode} (${cardName}) → "${newQuestion}"`);
-  return handleQuery({ from, question: newQuestion, dbName: pending.dbName });
+  return handleQuery({ from, question: newQuestion, dbName: pending.dbName, _skipFallback: true });
 }
 
 // ─── Eski getCashflow interface'ini koru (geriye dönük uyumluluk) ───
