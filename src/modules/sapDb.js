@@ -301,6 +301,38 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top =
 }
 
 // ─────────────────────────────────────────────────────────────
+// Cari Adından CardCode Çözümle
+//
+// Kullanıcı CardCode yerine isim verdiğinde (ör: "ABC Teknoloji")
+// OCRD'de CardName LIKE araması yapar, ilk eşleşeni döndürür.
+//
+// currency verilmişse (ör: "USD") yalnızca o para birimiyle kayıtlı cariyi getirir.
+// ─────────────────────────────────────────────────────────────
+async function resolveCardCode({ cardName, currency, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+
+  request.input('CardName', sql.NVarChar(100), `%${cardName}%`);
+
+  let currencyClause = '';
+  if (currency) {
+    request.input('Currency', sql.NVarChar(10), currency.toUpperCase());
+    currencyClause = 'AND Currency = @Currency';
+  }
+
+  const query = `
+    SELECT TOP 1 CardCode, CardName, Currency
+    FROM OCRD WITH(NOLOCK)
+    WHERE CardName LIKE @CardName
+      ${currencyClause}
+    ORDER BY CardName
+  `;
+
+  const result = await request.query(query);
+  return result.recordset[0] || null;  // { CardCode, CardName, Currency } | null
+}
+
+// ─────────────────────────────────────────────────────────────
 // Servis Bildirim Polling — Tüm servis çağrılarının anlık durumu
 //
 // Sadece serviceNotifier.js tarafından kullanılır.
@@ -328,4 +360,4 @@ async function getServisGuncellemeleri({ dbName } = {}) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri };
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode };

@@ -301,15 +301,26 @@ OJDT (başlık) ve JDT1 (satırlar) tablolarına karşılık gelir.
 
 Sistem içinde tanımlı özel endpoint — OJDT + JDT1 tablolarını direkt sorgular:
 
+**CardCode biliniyorsa:**
 ```json
 {
   "endpoint": "SQL_CARI_EKSTRE",
-  "params": {
-    "cardCode": "MB00006",
-    "refDate": "2026-04-16"
-  }
+  "params": { "cardCode": "MB00006", "refDate": "2026-04-16" }
 }
 ```
+
+**Kullanıcı isim verdiyse (CardCode bilinmiyorsa):**
+```json
+{
+  "endpoint": "SQL_CARI_EKSTRE",
+  "params": { "cardName": "ABC Teknoloji", "refDate": "2026-04-16" }
+}
+```
+
+**İsim + döviz:** `"cardName": "ABC", "currency": "USD"` → Currency eşleşen ilk kayıt getirilir.
+
+> Sistem `cardName` parametresini görünce otomatik olarak OCRD'den CardCode'u çözümler.
+> `cardCode` ve `cardName` aynı anda kullanılmaz.
 
 **Ne yapar:**
 - `OJDT INNER JOIN JDT1` ile cari tüm hareketleri çeker

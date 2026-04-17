@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode } = require('./sapDb');
 const { sendText }                   = require('../services/whatsappService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
@@ -86,11 +86,20 @@ KRİTİK KURALLAR (asla ihlal etme):
 3. "BusinessPartners" sadece cari arama (CardName, CardCode bulmak) için kullan.
    Balance alanını HİÇBİR ZAMAN $select'e ekleme.
 
+4. CARİ TANIMLAMA KURALI — CardCode vs cardName:
+   - Kullanıcı "C001", "MB00006" gibi bir kod verdiyse → params.cardCode kullan
+   - Kullanıcı firma/kişi ismi verdiyse (ör: "ABC Teknoloji", "Endeks") → params.cardName kullan
+   - Döviz de belirtildiyse (ör: "USD hesabı") → params.currency ekle
+   - cardCode ve cardName'i ASLA aynı anda kullanma
+   - cardName verildiğinde sistem otomatik olarak OCRD'den CardCode'u bulur
+
 ÖZEL SQL ENDPOİNTLERİ:
 
 Tek cari bakiye / ekstre / yürüyen bakiye:
   endpoint: "SQL_CARI_EKSTRE"
-  params: { "cardCode": "CARDCODE", "refDate": "YYYY-MM-DD" }
+  params: { "cardCode": "CARDCODE", "refDate": "YYYY-MM-DD" }   ← CardCode biliniyorsa
+     veya: { "cardName": "ABC Teknoloji", "refDate": "YYYY-MM-DD" }  ← isimden ara
+     veya: { "cardName": "ABC", "currency": "USD", "refDate": "YYYY-MM-DD" }  ← isim + döviz
   → Kullanım: "... bakiyesi", "... hesap durumu", "... borcu ne kadar", "... alacağı"
 
 Tüm carilerin bakiye özeti:
@@ -101,7 +110,8 @@ Tüm carilerin bakiye özeti:
 Teknik servis / hizmet çağrısı sorguları:
   endpoint: "SQL_HIZMET"
   params: {
-    "cardCode": "CARDCODE",      (opsiyonel - müşteri kodu ile filtrele)
+    "cardCode": "CARDCODE",      (opsiyonel - kod biliniyorsa)
+    "cardName": "ABC Firma",     (opsiyonel - isimden ara, cardCode yerine kullan)
     "serialNo": "SN123",         (opsiyonel - seri no ile filtrele)
     "callId": "14",              (opsiyonel - çağrı numarası ile filtrele)
     "statusFilter": "open",      (opsiyonel - "open"=açık, "closed"=kapalı, boş=hepsi)
@@ -234,6 +244,29 @@ async function executeQueries(sl, queries, dbName) {
 
   for (const q of queries) {
     try {
+      // ── CardCode çözümleme: cardName varsa önce OCRD'den CardCode bul ──
+      if (q.params?.cardName && !q.params?.cardCode) {
+        const found = await resolveCardCode({
+          cardName: q.params.cardName,
+          currency: q.params.currency || null,
+          dbName,
+        });
+        if (found) {
+          console.log(`[Cashflow] CardCode çözümlendi: "${q.params.cardName}" → ${found.CardCode}`);
+          q.params.cardCode = found.CardCode;
+        } else {
+          console.warn(`[Cashflow] CardCode bulunamadı: "${q.params.cardName}"`);
+          results[q.id] = {
+            description: q.description,
+            endpoint:    q.endpoint,
+            data:        [],
+            count:       0,
+            error:       `"${q.params.cardName}" adında cari bulunamadı`,
+          };
+          continue;
+        }
+      }
+
       console.log(`[Cashflow] SAP → ${q.endpoint}`, q.params);
 
       let data;
