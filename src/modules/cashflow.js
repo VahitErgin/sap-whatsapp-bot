@@ -201,7 +201,7 @@ async function handleQuery({ from, question, dbName, _skipFallback = false }) {
           return handleQuery({ from, question: `${found.CardCode} : ${question}`, dbName, _skipFallback: true });
         } else if (bpRes?.count > 1) {
           const records = bpRes.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
-          _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+          _pending.set(from, { question, searchTerm: cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
           return await sendCardSelectionList(from, records);
         }
       }
@@ -220,15 +220,18 @@ async function handleQuery({ from, question, dbName, _skipFallback = false }) {
     if (!_skipFallback) {
       const multiMatch = Object.values(results).find(r => r.error === 'multiple_matches');
       if (multiMatch) {
-        const cardName = plan.queries.find(q => q.params?.cardName)?.params?.cardName || '';
-        _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+        const searchTerm = plan.queries.find(q => q.params?.cardName)?.params?.cardName || '';
+        _pending.set(from, { question, searchTerm, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
         return await sendCardSelectionList(from, multiMatch.data);
       }
 
       const bpMulti = Object.values(results).find(r => r.endpoint === 'BusinessPartners' && r.count > 1);
       if (bpMulti) {
-        const records = bpMulti.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
-        _pending.set(from, { question, cardName: '', dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+        const bpFilter   = plan.queries.find(q => q.endpoint === 'BusinessPartners')?.params?.['$filter'] || '';
+        const termMatch  = bpFilter.match(/contains\(CardName,'([^']+)'\)/i);
+        const searchTerm = termMatch?.[1] || '';
+        const records    = bpMulti.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
+        _pending.set(from, { question, searchTerm, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
         return await sendCardSelectionList(from, records);
       }
     }
@@ -281,10 +284,16 @@ async function handleCardSelection({ from, cardCode, cardName }) {
     return sendText(from, '⏱️ Seçim süresi doldu. Lütfen sorunuzu tekrar yazın.');
   }
 
-  // Orijinal sorguda geçen cari adını CardCode ile değiştir
-  const newQuestion = pending.cardName
-    ? pending.question.replace(new RegExp(pending.cardName, 'gi'), cardCode)
-    : `${cardCode} için: ${pending.question}`;
+  // Orijinal sorgudaki cari adını/arama terimini CardCode ile değiştir
+  // searchTerm biliniyorsa yerine koy, bilinmiyorsa başa ekle
+  let newQuestion;
+  if (pending.searchTerm) {
+    const esc = pending.searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    newQuestion = pending.question.replace(new RegExp(esc, 'gi'), cardCode);
+    if (newQuestion === pending.question) newQuestion = `${cardCode} : ${pending.question}`;
+  } else {
+    newQuestion = `${cardCode} : ${pending.question}`;
+  }
 
   console.log(`[Cashflow] Cari seçildi: ${cardCode} (${cardName}) → "${newQuestion}"`);
   return handleQuery({ from, question: newQuestion, dbName: pending.dbName, _skipFallback: true });
