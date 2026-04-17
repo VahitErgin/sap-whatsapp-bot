@@ -13,6 +13,14 @@
 const sql    = require('mssql');
 const config = require('../config/config');
 
+// Türkçe büyük harf: i→İ, ı→I + standart toUpperCase
+function upperTR(s) {
+  return String(s)
+    .replace(/i/g, 'İ')
+    .replace(/ı/g, 'I')
+    .toUpperCase();
+}
+
 // ─── Bağlantı havuzu ─────────────────────────────────────────
 const _pools = {};
 
@@ -316,7 +324,9 @@ async function resolveCardCode({ cardName, currency, dbName }) {
   const pool    = await getPool(dbName);
   const request = pool.request();
 
-  request.input('CardName', sql.NVarChar(100), `%${cardName}%`);
+  // UPPER() her iki tarafta → büyük/küçük harf, Türkçe i/İ/ı farkı yok
+  request.input('CardName',      sql.NVarChar(100), `%${cardName}%`);
+  request.input('CardNameUpper', sql.NVarChar(100), `%${upperTR(cardName)}%`);
 
   let currencyClause = '';
   if (currency) {
@@ -327,7 +337,8 @@ async function resolveCardCode({ cardName, currency, dbName }) {
   const query = `
     SELECT TOP 10 CardCode, CardName, Currency
     FROM OCRD WITH(NOLOCK)
-    WHERE CardName LIKE @CardName
+    WHERE (UPPER(CardName) LIKE UPPER(@CardName)
+        OR UPPER(CardName) LIKE @CardNameUpper)
       ${currencyClause}
     ORDER BY CardName
   `;
