@@ -183,6 +183,14 @@ async function handleQuery({ from, question, dbName }) {
       return await sendCardSelectionList(from, multiMatch.data);
     }
 
+    // 4b. BusinessPartners çoklu sonuç → seçim listesi (isimden arama yapıldıysa)
+    const bpMulti = Object.values(results).find(r => r.endpoint === 'BusinessPartners' && r.count > 1);
+    if (bpMulti) {
+      const records = bpMulti.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
+      _pending.set(from, { question, cardName: '', dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+      return await sendCardSelectionList(from, records);
+    }
+
     // 5. Claude ile sonuçları formatla
     const formatted = await formatResults(question, plan.queries, results);
     await sendText(from, formatted);
@@ -199,16 +207,22 @@ async function handleQuery({ from, question, dbName }) {
 // Çoklu cari listesini WhatsApp liste mesajı olarak gönder
 // ─────────────────────────────────────────────────────────────
 async function sendCardSelectionList(to, records) {
-  const rows = records.slice(0, 10).map(r => ({
-    id:          `CARI_SEL:${r.CardCode}|${r.CardName.substring(0, 60)}`,
-    title:       r.CardCode,
-    description: r.CardName.substring(0, 72),
-  }));
+  const rows = records.slice(0, 10).map(r => {
+    const code     = r.CardCode || r.cardCode || '';
+    const name     = r.CardName || r.cardName || '';
+    const currency = r.Currency || r.currency || '';
+    const desc     = [name, currency].filter(Boolean).join(' | ').substring(0, 72);
+    return {
+      id:          `CARI_SEL:${code}|${name.substring(0, 60)}`,
+      title:       code,
+      description: desc,
+    };
+  });
 
   return sendList(
     to,
     '🔍 Birden fazla cari bulundu',
-    'Hangi cariyi kastediyordunuz? Aşağıdan seçin:',
+    'Hangi cariyi kastediyordunuz? Seçin, sorgunuz otomatik çalışır:',
     'Carileri Gör',
     [{ title: 'Eşleşen Cariler', rows }]
   );
