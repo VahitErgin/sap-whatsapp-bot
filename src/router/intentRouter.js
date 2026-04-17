@@ -103,6 +103,14 @@ async function handleIncoming({ from, text, message, value }) {
       const docEntry = upper.replace('REJECT:', '').trim();
       return await approval.confirmApproval({ from, docEntry, action: 'reject' });
     }
+    if (text.startsWith('CARI_SEL:')) {
+      // "CARI_SEL:MB00001|ABC Teknoloji Ltd." formatı
+      const payload  = text.slice('CARI_SEL:'.length);
+      const sepIdx   = payload.indexOf('|');
+      const cardCode = sepIdx >= 0 ? payload.slice(0, sepIdx).trim() : payload.trim();
+      const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
+      return await cashflow.handleCardSelection({ from, cardCode, cardName });
+    }
 
     // ── 2. Claude ile intent belirle ─────────────────────────
     const intent = await detectIntent(text);

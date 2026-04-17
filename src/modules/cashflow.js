@@ -23,7 +23,7 @@ const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
 const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode } = require('./sapDb');
-const { sendText }                   = require('../services/whatsappService');
+const { sendText, sendList }         = require('../services/whatsappService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
 // ─── Dokümanları oku ──────────────────────────────────────────
@@ -140,16 +140,10 @@ KURALLAR:
 - Türkçe yaz
 - Veri yoksa "Kayıt bulunamadı" de
 
-ÖZEL DURUM — hata: "multiple_matches":
-Birden fazla cari bulundu demektir. Kullanıcıya listeyi göster ve hangi cariyi kastettiğini sor.
-Format:
-🔍 *"[aranan isim]"* için birden fazla cari bulundu. Hangisini kastediyordunuz?
+Veri yoksa "Kayıt bulunamadı" de`;
 
-  • *MB00001* – ABC Teknoloji Ltd. Şti.
-  • *MB00002* – ABC Holding A.Ş.
-  • ...
-
-Kodu yazarak tekrar sorabilirsiniz: _"MB00001'in bakiyesi"_`;
+// ─── Çoklu cari seçimi için bekleyen sorgular (5 dakika TTL) ─
+const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt }
 
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
@@ -181,7 +175,15 @@ async function handleQuery({ from, question, dbName }) {
     const sl      = getConnection(dbName || config.sap.companyDb);
     const results = await executeQueries(sl, plan.queries, dbName || config.sap.companyDb);
 
-    // 4. Claude ile sonuçları formatla
+    // 4. Çoklu cari eşleşmesi? → liste göster, bekle
+    const multiMatch = Object.values(results).find(r => r.error === 'multiple_matches');
+    if (multiMatch) {
+      const cardName = plan.queries.find(q => q.params?.cardName)?.params?.cardName || '';
+      _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+      return await sendCardSelectionList(from, multiMatch.data);
+    }
+
+    // 5. Claude ile sonuçları formatla
     const formatted = await formatResults(question, plan.queries, results);
     await sendText(from, formatted);
 
@@ -191,6 +193,45 @@ async function handleQuery({ from, question, dbName }) {
       '⚠️ SAP sorgusu sırasında hata oluştu. Lütfen tekrar deneyin.'
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Çoklu cari listesini WhatsApp liste mesajı olarak gönder
+// ─────────────────────────────────────────────────────────────
+async function sendCardSelectionList(to, records) {
+  const rows = records.slice(0, 10).map(r => ({
+    id:          `CARI_SEL:${r.CardCode}|${r.CardName.substring(0, 60)}`,
+    title:       r.CardCode,
+    description: r.CardName.substring(0, 72),
+  }));
+
+  return sendList(
+    to,
+    '🔍 Birden fazla cari bulundu',
+    'Hangi cariyi kastediyordunuz? Aşağıdan seçin:',
+    'Carileri Gör',
+    [{ title: 'Eşleşen Cariler', rows }]
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Kullanıcı listeden bir cari seçti → bekleyen sorguyu çalıştır
+// ─────────────────────────────────────────────────────────────
+async function handleCardSelection({ from, cardCode, cardName }) {
+  const pending = _pending.get(from);
+  _pending.delete(from);
+
+  if (!pending || Date.now() > pending.expiresAt) {
+    return sendText(from, '⏱️ Seçim süresi doldu. Lütfen sorunuzu tekrar yazın.');
+  }
+
+  // Orijinal sorguda geçen cari adını CardCode ile değiştir
+  const newQuestion = pending.cardName
+    ? pending.question.replace(new RegExp(pending.cardName, 'gi'), cardCode)
+    : `${cardCode} için: ${pending.question}`;
+
+  console.log(`[Cashflow] Cari seçildi: ${cardCode} (${cardName}) → "${newQuestion}"`);
+  return handleQuery({ from, question: newQuestion, dbName: pending.dbName });
 }
 
 // ─── Eski getCashflow interface'ini koru (geriye dönük uyumluluk) ───
@@ -413,4 +454,4 @@ async function formatResults(originalQuestion, queries, results, retries = 2) {
   }
 }
 
-module.exports = { getCashflow, handleQuery };
+module.exports = { getCashflow, handleQuery, handleCardSelection };
