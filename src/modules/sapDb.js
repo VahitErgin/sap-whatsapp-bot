@@ -324,9 +324,11 @@ async function resolveCardCode({ cardName, currency, dbName }) {
   const pool    = await getPool(dbName);
   const request = pool.request();
 
-  // UPPER() her iki tarafta → büyük/küçük harf, Türkçe i/İ/ı farkı yok
-  request.input('CardName',      sql.NVarChar(100), `%${cardName}%`);
-  request.input('CardNameUpper', sql.NVarChar(100), `%${upperTR(cardName)}%`);
+  // Üç varyant: orijinal + Türkçe büyük (İ) + ASCII büyük (I)
+  // Collation farkından bağımsız, mutlaka biri eşleşir
+  request.input('Name1', sql.NVarChar(100), `%${cardName}%`);
+  request.input('Name2', sql.NVarChar(100), `%${upperTR(cardName)}%`);
+  request.input('Name3', sql.NVarChar(100), `%${cardName.toUpperCase()}%`);
 
   let currencyClause = '';
   if (currency) {
@@ -337,8 +339,7 @@ async function resolveCardCode({ cardName, currency, dbName }) {
   const query = `
     SELECT TOP 10 CardCode, CardName, Currency
     FROM OCRD WITH(NOLOCK)
-    WHERE (UPPER(CardName) LIKE UPPER(@CardName)
-        OR UPPER(CardName) LIKE @CardNameUpper)
+    WHERE (CardName LIKE @Name1 OR CardName LIKE @Name2 OR CardName LIKE @Name3)
       ${currencyClause}
     ORDER BY CardName
   `;

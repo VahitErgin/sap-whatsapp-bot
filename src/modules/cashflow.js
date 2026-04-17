@@ -184,12 +184,12 @@ async function handleQuery({ from, question, dbName, _skipFallback = false }) {
       const nameMatch = question.match(/([A-ZÇĞİÖŞÜa-zçğışöşü]{3,}(?:\s+[A-ZÇĞİÖŞÜa-zçğışöşü]{2,})*)/);
       if (nameMatch) {
         const cardName      = nameMatch[1].trim();
-        const cardNameUpper = cardName.replace(/i/g, 'İ').replace(/ı/g, 'I').toUpperCase();
+        const cardNameTR    = cardName.replace(/i/g, 'İ').replace(/ı/g, 'I').toUpperCase();
+        const cardNameASCII = cardName.toUpperCase();
         const escaped       = (s) => s.replace(/'/g, "''");
-        const filter = cardName === cardNameUpper
-          ? `contains(CardName,'${escaped(cardName)}')`
-          : `contains(CardName,'${escaped(cardName)}') or contains(CardName,'${escaped(cardNameUpper)}')`;
-        console.log(`[Cashflow] clarification fallback → BusinessPartners: "${cardName}" / "${cardNameUpper}"`);
+        const variants      = [...new Set([cardName, cardNameTR, cardNameASCII])];
+        const filter        = variants.map(v => `contains(CardName,'${escaped(v)}')`).join(' or ');
+        console.log(`[Cashflow] clarification fallback → BusinessPartners: "${cardName}" / "${cardNameTR}" / "${cardNameASCII}"`);
         const sl       = getConnection(dbName || config.sap.companyDb);
         const fallback = await executeQueries(sl, [{
           id: 'q1', description: 'Cari arama', endpoint: 'BusinessPartners', method: 'GET',
