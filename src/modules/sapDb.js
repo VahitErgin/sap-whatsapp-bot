@@ -13,14 +13,6 @@
 const sql    = require('mssql');
 const config = require('../config/config');
 
-// Türkçe büyük harf: i→İ, ı→I + standart toUpperCase
-function upperTR(s) {
-  return String(s)
-    .replace(/i/g, 'İ')
-    .replace(/ı/g, 'I')
-    .toUpperCase();
-}
-
 // ─── Bağlantı havuzu ─────────────────────────────────────────
 const _pools = {};
 
@@ -320,12 +312,20 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top =
 //   { found: 'one',  record: { CardCode, CardName, Currency } }  → tek eşleşme
 //   { found: 'many', records: [...] }                            → birden fazla
 //   { found: 'none' }                                            → bulunamadı
+// "OKSID" → "OKSİD": önce lowercase yapıp i→İ dönüşümü sağlıklı çalışır
+function upperTR(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/i/g, 'İ')
+    .replace(/ı/g, 'I')
+    .toUpperCase();
+}
+
 async function resolveCardCode({ cardName, currency, dbName }) {
   const pool    = await getPool(dbName);
   const request = pool.request();
 
-  // Üç varyant: orijinal + Türkçe büyük (İ) + ASCII büyük (I)
-  // Collation farkından bağımsız, mutlaka biri eşleşir
+  // Üç varyant: orijinal + Türkçe büyük (OKSİD) + ASCII büyük (OKSID)
   request.input('Name1', sql.NVarChar(100), `%${cardName}%`);
   request.input('Name2', sql.NVarChar(100), `%${upperTR(cardName)}%`);
   request.input('Name3', sql.NVarChar(100), `%${cardName.toUpperCase()}%`);
@@ -426,4 +426,21 @@ async function getOnayBekleyenler({ dbName } = {}) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler };
+// ─────────────────────────────────────────────────────────────
+// Telefon numarasına göre OUSR kaydını getir
+// ─────────────────────────────────────────────────────────────
+async function getUserByPhone(phone10, dbName) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('Phone', sql.NVarChar(20), `%${phone10}`);
+
+  const result = await request.query(`
+    SELECT TOP 1 USER_CODE, U_NAME, PortNum
+    FROM OUSR WITH(NOLOCK)
+    WHERE PortNum LIKE @Phone
+  `);
+
+  return result.recordset[0] || null;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone };

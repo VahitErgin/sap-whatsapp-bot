@@ -17,13 +17,14 @@
  */
 
 const axios  = require('axios');
-const config = require('../config/config');               // FIX: ../config/config
-const { sendText } = require('../services/whatsappService'); // FIX: ../services/
+const config = require('../config/config');
+const { sendText } = require('../services/whatsappService');
+const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
 function getModules() {
-  if (!cashflow) cashflow = require('../modules/cashflow');   // FIX: ../modules/
+  if (!cashflow) cashflow = require('../modules/cashflow');
   if (!approval) approval = require('../modules/approval');
   if (!support)  support  = require('../modules/support');
 }
@@ -88,13 +89,23 @@ NOT: Kullanıcı "getir", "listele", "göster", "ver", "kaç tane" gibi kelimele
 // ─────────────────────────────────────────────────────────────
 // Ana yönlendirici
 // ─────────────────────────────────────────────────────────────
-async function handleIncoming({ from, text, message, value }) {
+async function handleIncoming({ from, text }) {
   getModules();
 
   const upper = text.toUpperCase().trim();
 
   try {
-    // ── 1. Buton / liste cevapları → direkt yönlendir ────────
+    // ── 1. Yetki kontrolü ────────────────────────────────────
+    const user = await resolveUser(from);
+    if (!user) {
+      return await sendText(from,
+        '⛔ *Yetkiniz Bulunmamaktadır*\n\n' +
+        'Bu botu kullanabilmek için SAP B1 sistemine tanımlı olmanız gerekmektedir.\n\n' +
+        'Lütfen sistem yöneticinizle iletişime geçin.'
+      );
+    }
+
+    // ── 2. Buton / liste cevapları → direkt yönlendir ────────
     if (upper.startsWith('APPROVE:')) {
       const docEntry = upper.replace('APPROVE:', '').trim();
       return await approval.confirmApproval({ from, docEntry, action: 'approve' });
@@ -104,7 +115,6 @@ async function handleIncoming({ from, text, message, value }) {
       return await approval.confirmApproval({ from, docEntry, action: 'reject' });
     }
     if (text.startsWith('CARI_SEL:')) {
-      // "CARI_SEL:MB00001|ABC Teknoloji Ltd." formatı
       const payload  = text.slice('CARI_SEL:'.length);
       const sepIdx   = payload.indexOf('|');
       const cardCode = sepIdx >= 0 ? payload.slice(0, sepIdx).trim() : payload.trim();
@@ -112,19 +122,26 @@ async function handleIncoming({ from, text, message, value }) {
       return await cashflow.handleCardSelection({ from, cardCode, cardName });
     }
 
-    // ── 2. Claude ile intent belirle ─────────────────────────
+    // ── 3. Claude ile intent belirle ─────────────────────────
     const intent = await detectIntent(text);
-    console.log(`[Router] (${from}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
+    console.log(`[Router] (${from}/${user.license}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
 
-    // ── 3. Modüle yönlendir ───────────────────────────────────
+    // ── 4. Lisans kontrolü ───────────────────────────────────
+    if (!canAccessIntent(user, intent.intent)) {
+      return await sendText(from,
+        `⛔ *Yetersiz Lisans*\n\n` +
+        `*${user.license}* lisansınız bu işlem için yeterli değil.\n\n` +
+        `Kullanabileceğiniz özellikler için *yardım* yazın.`
+      );
+    }
+
+    // ── 5. Modüle yönlendir ───────────────────────────────────
     switch (intent.intent) {
 
       case 'cashflow':
-        // FIX: getCashflow yerine handleQuery kullan (tam doğal dil desteği)
-        return await cashflow.handleQuery({ from, question: text });
+        return await cashflow.handleQuery({ from, question: text, licenseRestriction: user.cashflowRestriction });
 
       case 'approval': {
-        // FIX: case bloğu {} ile sarıldı → const scope hatası giderildi
         const docMatch = text.match(/\d+/);
         const docEntry = docMatch ? docMatch[0] : null;
 

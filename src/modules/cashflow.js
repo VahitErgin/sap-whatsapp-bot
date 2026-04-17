@@ -162,7 +162,7 @@ const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
-async function handleQuery({ from, question, dbName, _skipFallback = false }) {
+async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null }) {
   if (!question || question.trim() === '') {
     return await sendText(from,
       '📊 *SAP Sorgulama*\n\nNe öğrenmek istersiniz?\n\nÖrnek:\n• _"C001 carisinin bakiyesi"_\n• _"Bu hafta vadesi gelen ödemeler"_\n• _"Stokta azalan ürünler"_'
@@ -174,7 +174,10 @@ async function handleQuery({ from, question, dbName, _skipFallback = false }) {
 
   try {
     // 1. Claude'a sor: hangi SAP sorgusunu çalıştıralım?
-    const plan = await buildQueryPlan(question);
+    const planQuestion = licenseRestriction
+      ? `[LİSANS KISITLAMASI: ${licenseRestriction}]\n\n${question}`
+      : question;
+    const plan = await buildQueryPlan(planQuestion);
 
     // 2. Ek bilgi gerekiyor mu?
     // Planner clarification istedi ama soru içinde isim/harf dizisi varsa
