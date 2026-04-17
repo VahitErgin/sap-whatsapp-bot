@@ -121,10 +121,24 @@ Teknik servis / hizmet çağrısı sorguları:
 
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
-- Eğer kullanıcıdan ek bilgi gerekiyorsa clarification_needed: true yap ve mesajı yaz
 - Parametre yoksa params: {} bırak
 - Tarih belirtilmemişse refDate: "${new Date().toISOString().split('T')[0]}" kullan
-- Sadece JSON döndür, açıklama ekleme`;
+- Sadece JSON döndür, açıklama ekleme
+
+KRİTİK — clarification_needed KULLANIM KURALI:
+clarification_needed: true SADECE şu durumda kullan:
+  → Sorgu tipi tamamen belirsiz VE isim/kod/konu yoksa (ör: sadece "bilgi ver")
+clarification_needed: false kullan (ZORUNLU) şu durumlarda:
+  → Kullanıcı bir firma/kişi adı verdiyse → cardName kullan, SOR MA
+  → Kullanıcı CardCode verdiyse (C001, MB001 gibi) → cardCode kullan, SOR MA
+  → Kullanıcı konu belirttiyse (bakiye, fatura, stok vb.) → sorgula, SOR MA
+
+ÖRNEKLER — clarification_needed: false:
+- "OKSİD bakiyesi" → SQL_CARI_EKSTRE, cardName: "OKSİD"
+- "Endeks firması" → BusinessPartners, $filter: contains(CardName,'Endeks')
+- "ABC Teknoloji servisi" → SQL_HIZMET, cardName: "ABC Teknoloji"
+- "Veli Bey'in faturaları" → Invoices, $filter: contains(CardName,'Veli')
+- "C001" → SQL_CARI_EKSTRE, cardCode: "C001"  (tek kelime = bakiye sorgula)`;
 
 // ─── Claude: Sonuçları formatla ───────────────────────────────
 const FORMATTER_PROMPT = `Sen SAP Business One asistanısın.
@@ -163,7 +177,28 @@ async function handleQuery({ from, question, dbName }) {
     const plan = await buildQueryPlan(question);
 
     // 2. Ek bilgi gerekiyor mu?
+    // Planner clarification istedi ama soru içinde isim/harf dizisi varsa
+    // → direkt BusinessPartners'da cardName araması yap (hatalı clarification kurtarma)
     if (plan.clarification_needed) {
+      const nameMatch = question.match(/([A-ZÇĞİÖŞÜa-zçğışöşü]{3,}(?:\s+[A-ZÇĞİÖŞÜa-zçğışöşü]{2,})*)/);
+      if (nameMatch) {
+        const cardName = nameMatch[1].trim();
+        console.log(`[Cashflow] clarification fallback → BusinessPartners cardName: "${cardName}"`);
+        const sl       = getConnection(dbName || config.sap.companyDb);
+        const fallback = await executeQueries(sl, [{
+          id: 'q1', description: 'Cari arama', endpoint: 'BusinessPartners', method: 'GET',
+          params: { '$filter': `contains(CardName,'${cardName.replace(/'/g, "''")}')`, '$select': 'CardCode,CardName,Currency,CardType', '$top': '10' },
+        }], dbName || config.sap.companyDb);
+        const bpRes = fallback['q1'];
+        if (bpRes?.count === 1) {
+          const found = bpRes.data[0];
+          return handleQuery({ from, question: `${found.CardCode} : ${question}`, dbName });
+        } else if (bpRes?.count > 1) {
+          const records = bpRes.data.map(r => ({ CardCode: r.CardCode, CardName: r.CardName, Currency: r.Currency || '' }));
+          _pending.set(from, { question, cardName, dbName, expiresAt: Date.now() + 5 * 60 * 1000 });
+          return await sendCardSelectionList(from, records);
+        }
+      }
       return await sendText(from, `❓ ${plan.clarification_message}`);
     }
 
