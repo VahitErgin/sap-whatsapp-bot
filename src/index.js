@@ -6,7 +6,8 @@ const config      = require('./config/config');
 const { handleIncoming } = require('./router/intentRouter');
 const adminRouter = require('./admin/adminRouter');
 
-const serviceNotifier = require('./jobs/serviceNotifier');
+const serviceNotifier  = require('./jobs/serviceNotifier');
+const approvalNotifier = require('./jobs/approvalNotifier');
 const { logMessage }  = require('./services/messageLogger');
 const { transcribeVoice } = require('./services/voiceHandler');
 const { sendText }    = require('./services/whatsappService');
@@ -131,4 +132,5 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 app.listen(config.port, () => {
   console.log(`[Sunucu] http://localhost:${config.port} üzerinde çalışıyor`);
   serviceNotifier.start();
+  approvalNotifier.start();
 });

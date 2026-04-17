@@ -215,6 +215,54 @@
       </div>
 
     </div>
+
+    <!-- Onay Bildirimi: SAP Kullanıcı → Telefon Eşlemesi -->
+    <div class="row g-3 mt-1">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-bell-fill me-2"></i>Onay Bildirimi — SAP Kullanıcı / Telefon Eşlemesi</span>
+            <button class="btn btn-sm btn-primary" onclick="showAddPhoneRow()">
+              <i class="bi bi-plus-lg me-1"></i>Ekle
+            </button>
+          </div>
+          <div class="card-body p-0">
+            <div id="apAddRow" class="d-none p-3 border-bottom bg-light">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                  <label class="form-label fw-semibold small">SAP Kullanıcı Kodu</label>
+                  <input type="text" class="form-control form-control-sm" id="apUserCode" placeholder="manager">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-semibold small">WhatsApp Numarası</label>
+                  <input type="text" class="form-control form-control-sm" id="apPhone" placeholder="905001234567">
+                </div>
+                <div class="col-md-4">
+                  <button class="btn btn-success btn-sm" onclick="addApproverPhone()">
+                    <i class="bi bi-check-lg me-1"></i>Kaydet
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm ms-1" onclick="hideAddPhoneRow()">İptal</button>
+                </div>
+              </div>
+              <div id="apAddErr" class="text-danger small mt-1 d-none"></div>
+            </div>
+            <table class="table table-sm table-hover mb-0" id="apTable">
+              <thead class="table-light">
+                <tr>
+                  <th>SAP Kullanıcı</th>
+                  <th>WhatsApp Numarası</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="apBody">
+                <tr><td colspan="3" class="text-center text-muted py-3">Yükleniyor...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -401,6 +449,63 @@ async function changePassword() {
 
 loadStatus();
 loadSettings();
+loadApproverPhones();
+
+// ─── Onay Bildirimi Kullanıcı/Telefon Yönetimi ────────────────
+async function loadApproverPhones() {
+  const res  = await fetch('/admin/api/approver-phones');
+  const list = await res.json();
+  const tbody = document.getElementById('apBody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">Kayıt yok</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(r => `
+    <tr>
+      <td><code>${r.userCode}</code></td>
+      <td>${r.phone}</td>
+      <td class="text-end">
+        <button class="btn btn-outline-danger btn-sm py-0" onclick="deleteApproverPhone('${r.userCode}')">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+function showAddPhoneRow()  { document.getElementById('apAddRow').classList.remove('d-none'); }
+function hideAddPhoneRow()  {
+  document.getElementById('apAddRow').classList.add('d-none');
+  document.getElementById('apAddErr').classList.add('d-none');
+  document.getElementById('apUserCode').value = '';
+  document.getElementById('apPhone').value = '';
+}
+
+async function addApproverPhone() {
+  const userCode = document.getElementById('apUserCode').value.trim();
+  const phone    = document.getElementById('apPhone').value.trim();
+  const errEl    = document.getElementById('apAddErr');
+  errEl.classList.add('d-none');
+
+  const res  = await fetch('/admin/api/approver-phones', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userCode, phone }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    hideAddPhoneRow();
+    loadApproverPhones();
+  } else {
+    errEl.textContent = data.error;
+    errEl.classList.remove('d-none');
+  }
+}
+
+async function deleteApproverPhone(userCode) {
+  if (!confirm(`"${userCode}" eşlemesini silmek istiyor musunuz?`)) return;
+  await fetch(`/admin/api/approver-phones/${encodeURIComponent(userCode)}`, { method: 'DELETE' });
+  loadApproverPhones();
+}
 </script>
 </body>
 </html>

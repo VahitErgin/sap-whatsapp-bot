@@ -380,4 +380,48 @@ async function getServisGuncellemeleri({ dbName } = {}) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode };
+// ─────────────────────────────────────────────────────────────
+// Onay Bekleyen Belgeler — OWDD + WDD1 + OUSR
+//
+// SAP B1 onay sürecinde "W" (Waiting) durumundaki tüm belgeleri
+// ve atanmış onaylayıcı kullanıcıları döndürür.
+// ─────────────────────────────────────────────────────────────
+async function getOnayBekleyenler({ dbName } = {}) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+
+  const query = `
+    SELECT
+      d.DocEntry,
+      d.DocNum,
+      d.ObjType,
+      CAST(ISNULL(d.DocTotal, 0) AS DECIMAL(18,2)) AS DocTotal,
+      ISNULL(d.DocCur, 'TRY')                      AS ParaBirimi,
+      ISNULL(d.CardCode, '')                        AS CardCode,
+      ISNULL(d.CardName, '')                        AS CardName,
+      CONVERT(VARCHAR(10), d.ReqDate, 23)           AS TalepTarihi,
+      ISNULL(d.Dscription, '')                      AS Aciklama,
+      w.UserID                                      AS OnaylayanKod,
+      ISNULL(u.U_Name, w.UserID)                    AS OnaylayanAd,
+      CASE d.ObjType
+        WHEN '22'         THEN 'Satın Alma Siparişi'
+        WHEN '20'         THEN 'Teslimat'
+        WHEN '17'         THEN 'Satış Faturası'
+        WHEN '18'         THEN 'İade Faturası'
+        WHEN '13'         THEN 'Fatura'
+        WHEN '1470000113' THEN 'Satış Siparişi'
+        ELSE 'Belge (' + d.ObjType + ')'
+      END AS BelgeTipi
+    FROM OWDD d WITH(NOLOCK)
+    INNER JOIN WDD1 w WITH(NOLOCK) ON d.DocEntry = w.WddCode
+    LEFT  JOIN OUSR u WITH(NOLOCK) ON w.UserID   = u.UserCode
+    WHERE d.Status = 'W'
+      AND w.Status = 'W'
+    ORDER BY d.ReqDate DESC
+  `;
+
+  const result = await request.query(query);
+  return result.recordset;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler };
