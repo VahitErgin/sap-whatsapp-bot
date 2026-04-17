@@ -308,6 +308,10 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top =
 //
 // currency verilmişse (ör: "USD") yalnızca o para birimiyle kayıtlı cariyi getirir.
 // ─────────────────────────────────────────────────────────────
+// Döndürür:
+//   { found: 'one',  record: { CardCode, CardName, Currency } }  → tek eşleşme
+//   { found: 'many', records: [...] }                            → birden fazla
+//   { found: 'none' }                                            → bulunamadı
 async function resolveCardCode({ cardName, currency, dbName }) {
   const pool    = await getPool(dbName);
   const request = pool.request();
@@ -321,15 +325,19 @@ async function resolveCardCode({ cardName, currency, dbName }) {
   }
 
   const query = `
-    SELECT TOP 1 CardCode, CardName, Currency
+    SELECT TOP 10 CardCode, CardName, Currency
     FROM OCRD WITH(NOLOCK)
     WHERE CardName LIKE @CardName
       ${currencyClause}
     ORDER BY CardName
   `;
 
-  const result = await request.query(query);
-  return result.recordset[0] || null;  // { CardCode, CardName, Currency } | null
+  const result  = await request.query(query);
+  const records = result.recordset;
+
+  if (records.length === 0) return { found: 'none' };
+  if (records.length === 1) return { found: 'one', record: records[0] };
+  return { found: 'many', records };
 }
 
 // ─────────────────────────────────────────────────────────────

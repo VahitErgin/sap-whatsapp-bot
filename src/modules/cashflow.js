@@ -138,7 +138,18 @@ KURALLAR:
 - Liste uzunsa max 10 satır göster, "ve X tane daha..." ekle
 - Toplam/özet bilgisi ekle
 - Türkçe yaz
-- Veri yoksa "Kayıt bulunamadı" de`;
+- Veri yoksa "Kayıt bulunamadı" de
+
+ÖZEL DURUM — hata: "multiple_matches":
+Birden fazla cari bulundu demektir. Kullanıcıya listeyi göster ve hangi cariyi kastettiğini sor.
+Format:
+🔍 *"[aranan isim]"* için birden fazla cari bulundu. Hangisini kastediyordunuz?
+
+  • *MB00001* – ABC Teknoloji Ltd. Şti.
+  • *MB00002* – ABC Holding A.Ş.
+  • ...
+
+Kodu yazarak tekrar sorabilirsiniz: _"MB00001'in bakiyesi"_`;
 
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
@@ -246,15 +257,13 @@ async function executeQueries(sl, queries, dbName) {
     try {
       // ── CardCode çözümleme: cardName varsa önce OCRD'den CardCode bul ──
       if (q.params?.cardName && !q.params?.cardCode) {
-        const found = await resolveCardCode({
+        const resolved = await resolveCardCode({
           cardName: q.params.cardName,
           currency: q.params.currency || null,
           dbName,
         });
-        if (found) {
-          console.log(`[Cashflow] CardCode çözümlendi: "${q.params.cardName}" → ${found.CardCode}`);
-          q.params.cardCode = found.CardCode;
-        } else {
+
+        if (resolved.found === 'none') {
           console.warn(`[Cashflow] CardCode bulunamadı: "${q.params.cardName}"`);
           results[q.id] = {
             description: q.description,
@@ -264,6 +273,23 @@ async function executeQueries(sl, queries, dbName) {
             error:       `"${q.params.cardName}" adında cari bulunamadı`,
           };
           continue;
+
+        } else if (resolved.found === 'many') {
+          // Birden fazla eşleşme → kullanıcıya listele, sorguyu çalıştırma
+          console.warn(`[Cashflow] Birden fazla cari: "${q.params.cardName}" → ${resolved.records.length} sonuç`);
+          results[q.id] = {
+            description: q.description,
+            endpoint:    q.endpoint,
+            data:        resolved.records,
+            count:       resolved.records.length,
+            error:       'multiple_matches',
+          };
+          continue;
+
+        } else {
+          // Tek eşleşme → devam et
+          console.log(`[Cashflow] CardCode çözümlendi: "${q.params.cardName}" → ${resolved.record.CardCode}`);
+          q.params.cardCode = resolved.record.CardCode;
         }
       }
 
