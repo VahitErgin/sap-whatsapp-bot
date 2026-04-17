@@ -217,46 +217,6 @@ router.post('/api/settings', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// API – SAP Kullanıcı → WhatsApp Telefon Eşlemesi (Onay Bildirimi)
-// ─────────────────────────────────────────────────────────────
-
-const APPROVER_PHONES_FILE = path.join(__dirname, '../../data/approver-phones.json');
-
-function readApproverPhones() {
-  try {
-    const data = JSON.parse(fs.readFileSync(APPROVER_PHONES_FILE, 'utf8'));
-    delete data._comment;
-    return data;
-  } catch { return {}; }
-}
-function saveApproverPhones(data) {
-  fs.writeFileSync(APPROVER_PHONES_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
-
-router.get('/api/approver-phones', requireAuth, (req, res) => {
-  const data = readApproverPhones();
-  const list = Object.entries(data).map(([userCode, phone]) => ({ userCode, phone }));
-  res.json(list);
-});
-
-router.post('/api/approver-phones', requireAuth, (req, res) => {
-  const { userCode, phone } = req.body || {};
-  if (!userCode || !phone) return res.status(400).json({ error: 'userCode ve phone zorunlu' });
-  if (!/^\d{10,15}$/.test(phone)) return res.status(400).json({ error: 'Geçersiz telefon (ülke kodu dahil, + olmadan)' });
-  const data = readApproverPhones();
-  data[userCode.trim()] = phone.trim();
-  saveApproverPhones(data);
-  res.json({ ok: true });
-});
-
-router.delete('/api/approver-phones/:userCode', requireAuth, (req, res) => {
-  const data = readApproverPhones();
-  delete data[req.params.userCode];
-  saveApproverPhones(data);
-  res.json({ ok: true });
-});
-
-// ─────────────────────────────────────────────────────────────
 // API – SQL DB Bağlantı Testi
 // ─────────────────────────────────────────────────────────────
 router.post('/api/test-sqldb', requireAuth, async (req, res) => {

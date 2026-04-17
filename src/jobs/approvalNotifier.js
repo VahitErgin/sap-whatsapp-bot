@@ -4,15 +4,14 @@
  * approvalNotifier.js
  *
  * SAP B1 onay bekleyen belgelerini her 2 dakikada bir kontrol eder.
- * Yeni onay talebi geldiğinde ilgili onaylayıcıya WhatsApp bildirimi gönderir.
+ * Yeni onay talebi geldiğinde kayıtlı tüm onay yetkililerine WhatsApp bildirimi gönderir.
  *
  * Akış:
- *   OWDD + WDD1 polling → yeni W durumu → approver-phones.json'dan telefon bul
+ *   OWDD polling → yeni W durumu → readApprovers() listesindeki tüm telefonlara
  *   → sendButtons (Onayla / Reddet) → kullanıcı tap'lar
- *   → APPROVE:/REJECT: intentRouter'a düşer → confirmApproval çağrılır
+ *   → APPROVE:/REJECT: intentRouter'a düşer
  *
- * State  : data/approval-notif-state.json
- * Phones : data/approver-phones.json  (SAP UserCode → WA numarası)
+ * State : data/approval-notif-state.json
  */
 
 const fs   = require('fs');
@@ -20,21 +19,14 @@ const path = require('path');
 
 const { getOnayBekleyenler } = require('../modules/sapDb');
 const { sendButtons } = require('../services/whatsappService');
+const { readApprovers } = require('../admin/approverService');
 const config = require('../config/config');
 
-const DATA_DIR    = path.join(__dirname, '../../data');
-const STATE_FILE  = path.join(DATA_DIR, 'approval-notif-state.json');
-const PHONES_FILE = path.join(DATA_DIR, 'approver-phones.json');
+const DATA_DIR   = path.join(__dirname, '../../data');
+const STATE_FILE = path.join(DATA_DIR, 'approval-notif-state.json');
 const POLL_INTERVAL = 2 * 60 * 1000; // 2 dakika
 
-// data/ ve phones dosyası yoksa oluştur
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(PHONES_FILE)) {
-  fs.writeFileSync(PHONES_FILE, JSON.stringify({
-    '_comment': 'SAP UserCode → WhatsApp telefon (ülke kodu dahil, + olmadan)',
-    'manager': '905001234567',
-  }, null, 2), 'utf8');
-}
 
 // ─── Dosya okuma/yazma ───────────────────────────────────────
 function loadState() {
@@ -45,12 +37,10 @@ function saveState(state) {
     console.error('[ApprovalNotifier] State kayıt hatası:', e.message);
   }
 }
-function loadPhones() {
-  try {
-    const data = JSON.parse(fs.readFileSync(PHONES_FILE, 'utf8'));
-    delete data._comment;
-    return data; // { userCode: phone }
-  } catch { return {}; }
+// ─── Telefon normaliz: rakamları al, son 10 hane ─────────────
+function normPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.slice(-10);
 }
 
 // ─── Para formatı ────────────────────────────────────────────
@@ -81,34 +71,48 @@ async function sendApprovalNotification(phone, row) {
 // ─── Ana kontrol ─────────────────────────────────────────────
 async function checkOnaylar() {
   try {
-    const rows   = await getOnayBekleyenler({ dbName: config.sapDb.database || undefined });
-    const phones = loadPhones();
-    const state  = loadState();
+    const rows      = await getOnayBekleyenler({ dbName: config.sapDb.database || undefined });
+    const approvers = readApprovers().filter(a => a.phone);
+    const state     = loadState();
+
+    if (approvers.length === 0) {
+      console.warn('[ApprovalNotifier] Kayıtlı yetkili yok → Admin panelinden ekleyin');
+      return;
+    }
 
     const newState = {};
     let sent = 0;
 
     for (const row of rows) {
-      const key  = `${row.DocEntry}_${row.OnaylayanKod}`;
+      // Her belge+onaylayan çifti için ayrı state key (aynı belge farklı kişilere gidebilir)
+      const key = `${row.DocEntry}_${row.OnaylayanKod}`;
       newState[key] = { docNum: row.DocNum, belgeTipi: row.BelgeTipi, notifiedAt: state[key]?.notifiedAt || null };
 
-      // Daha önce bildirim gönderildi mi?
       if (state[key]?.notifiedAt) continue;
 
-      const phone = phones[row.OnaylayanKod];
-      if (!phone) {
-        console.warn(`[ApprovalNotifier] Telefon bulunamadı: ${row.OnaylayanKod} → approver-phones.json'a ekleyin`);
-        newState[key].notifiedAt = new Date().toISOString(); // tekrar uyarma
+      // SAP'taki onaylayıcı telefonunun son 10 hanesi
+      const sapPhone10 = normPhone(row.OnaylayanTelefon);
+
+      if (!sapPhone10) {
+        console.warn(`[ApprovalNotifier] OUSR.PortNum boş: ${row.OnaylayanKod} (${row.OnaylayanAd})`);
+        continue;
+      }
+
+      // Bot approvers listesinde son 10 hane eşleşen kaydı bul
+      const matched = approvers.find(a => normPhone(a.phone) === sapPhone10);
+
+      if (!matched) {
+        console.warn(`[ApprovalNotifier] Eşleşen kayıt yok: ${row.OnaylayanKod} (SAP tel son10: ${sapPhone10})`);
         continue;
       }
 
       try {
-        await sendApprovalNotification(phone, row);
+        await sendApprovalNotification(matched.phone, row);
         newState[key].notifiedAt = new Date().toISOString();
-        console.log(`[ApprovalNotifier] ✓ ${row.BelgeTipi} #${row.DocNum} → ${phone} (${row.OnaylayanKod})`);
+        console.log(`[ApprovalNotifier] ✓ ${row.BelgeTipi} #${row.DocNum} → ${matched.phone} (${matched.name} / ${row.OnaylayanKod})`);
         sent++;
       } catch (err) {
-        console.error(`[ApprovalNotifier] ✗ Gönderim hatası (${phone}):`, err.message);
+        console.error(`[ApprovalNotifier] ✗ Gönderim hatası (${matched.phone}):`, err.message);
       }
     }
 

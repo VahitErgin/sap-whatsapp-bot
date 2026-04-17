@@ -393,16 +393,17 @@ async function getOnayBekleyenler({ dbName } = {}) {
   const query = `
     SELECT
       d.DocEntry,
-      d.DocNum,
+      ISNULL(dr.DocNum, d.DocEntry)                    AS DocNum,
       d.ObjType,
-      CAST(ISNULL(d.DocTotal, 0) AS DECIMAL(18,2)) AS DocTotal,
-      ISNULL(d.DocCur, 'TRY')                      AS ParaBirimi,
-      ISNULL(d.CardCode, '')                        AS CardCode,
-      ISNULL(d.CardName, '')                        AS CardName,
-      CONVERT(VARCHAR(10), d.ReqDate, 23)           AS TalepTarihi,
-      ISNULL(d.Dscription, '')                      AS Aciklama,
-      w.UserID                                      AS OnaylayanKod,
-      ISNULL(u.U_Name, w.UserID)                    AS OnaylayanAd,
+      CAST(ISNULL(dr.DocTotal, 0) AS DECIMAL(18,2))   AS DocTotal,
+      ISNULL(dr.DocCur, 'TRY')                         AS ParaBirimi,
+      ISNULL(dr.CardCode, '')                          AS CardCode,
+      ISNULL(dr.CardName, '')                          AS CardName,
+      CONVERT(VARCHAR(10), d.CreateDate, 23)           AS TalepTarihi,
+      ISNULL(d.Remarks, '')                            AS Aciklama,
+      w.UserID                                         AS OnaylayanKod,
+      ISNULL(u.U_Name, w.UserID)                       AS OnaylayanAd,
+      ISNULL(u.PortNum, '')                            AS OnaylayanTelefon,
       CASE d.ObjType
         WHEN '22'         THEN 'Satın Alma Siparişi'
         WHEN '20'         THEN 'Teslimat'
@@ -414,10 +415,11 @@ async function getOnayBekleyenler({ dbName } = {}) {
       END AS BelgeTipi
     FROM OWDD d WITH(NOLOCK)
     INNER JOIN WDD1 w WITH(NOLOCK) ON d.DocEntry = w.WddCode
-    LEFT  JOIN OUSR u WITH(NOLOCK) ON w.UserID   = u.UserCode
+    LEFT  JOIN OUSR u WITH(NOLOCK) ON w.UserID   = u.USERID
+    LEFT  JOIN ODRF dr WITH(NOLOCK) ON d.DraftEntry = dr.DocEntry
     WHERE d.Status = 'W'
       AND w.Status = 'W'
-    ORDER BY d.ReqDate DESC
+    ORDER BY d.CreateDate DESC
   `;
 
   const result = await request.query(query);
