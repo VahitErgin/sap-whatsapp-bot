@@ -25,7 +25,9 @@ const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaiti
 const {
   handleCreateActivity, handleWizardInput,
   handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
+  handleWizardFirmSelection,
   getWizardState, confirmActivity,
+  handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
 } = require('../modules/crmActivity');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
@@ -90,10 +92,16 @@ async function handleIncoming({ from, text }) {
       const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
       return await cashflow.handleCardSelection({ from, cardCode, cardName });
     }
-    if (upper === 'ACT_SAVE')   return await confirmActivity(from);
-    if (upper === 'ACT_CANCEL') {
-      // Wizard veya pending varsa temizle
-      return await sendText(from, '🚫 Aktivite iptal edildi.');
+    if (upper === 'ACT_SAVE')    return await confirmActivity(from);
+    if (upper === 'LEAD_SAVE')   return await confirmLead(from);
+    if (upper === 'LEAD_CANCEL') return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.');
+    if (upper === 'ACT_CANCEL')  return await sendText(from, '🚫 Aktivite iptal edildi.');
+    if (text.startsWith('ACT_FIRM:')) {
+      const payload  = text.slice('ACT_FIRM:'.length);
+      const sepIdx   = payload.indexOf('|');
+      const cardCode = sepIdx >= 0 ? payload.slice(0, sepIdx).trim() : payload.trim();
+      const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
+      return await handleWizardFirmSelection(from, cardCode, cardName);
     }
     if (text.startsWith('ACT_TYPE:')) {
       return await handleWizardTypeSelection(from, text.replace('ACT_TYPE:', '').trim());
@@ -105,8 +113,9 @@ async function handleIncoming({ from, text }) {
       return await handleWizardSubjectSelection(from, text.replace('ACT_SUB:', '').trim());
     }
 
-    // ── 4. Wizard modu (firma adı veya not bekleniyor) ───────
-    if (getWizardState(from)) return await handleWizardInput(from, text);
+    // ── 4. Wizard modu ───────────────────────────────────────
+    if (getLeadWizardState(from)) return await handleLeadWizardInput(from, text);
+    if (getWizardState(from))     return await handleWizardInput(from, text);
 
     // ── 5. Intent belirle (keyword → Claude Haiku fallback) ──
     const intent = await detectIntentLocal(text);
@@ -139,6 +148,17 @@ async function handleIncoming({ from, text }) {
           return await sendText(from, `👋 Oturum kapatıldı. Görüşmek üzere, *${session.userName}*!`);
         }
         return await sendText(from, 'ℹ️ Zaten aktif bir oturumunuz bulunmuyor.');
+      }
+
+      case 'lead': {
+        const session = getSession(from);
+        if (!session) {
+          return await sendText(from,
+            '🔐 *Aday müşteri eklemek için giriş yapmanız gerekiyor.*\n\n' +
+            'SAP B1 hesabınızla giriş yapmak için *giriş yap* yazın.'
+          );
+        }
+        return await handleCreateLead({ from, session, dbName: user.dbName });
       }
 
       case 'crm': {
@@ -203,6 +223,15 @@ function _keywordIntent(text) {
   if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay'))
     return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
 
+  // Lead: aday müşteri / lead ekleme
+  if (
+    /aday\s+müşteri\s+(ekle|oluştur|kaydet|tanımla)/.test(t) ||
+    /lead\s+(ekle|oluştur|kaydet)/.test(t) ||
+    /yeni\s+(aday|müşteri\s+aday)/.test(t) ||
+    /(potansiyel|prospekt)\s+müşteri\s+ekle/.test(t)
+  )
+    return { intent: 'lead', confidence: 0.95, reason: 'keyword' };
+
   // CRM: açık oluşturma fiilleri veya 1. şahıs geçmiş zaman
   if (
     /aktivite\s+(oluştur|ekle|yaz|kaydet)/.test(t) ||
@@ -228,10 +257,11 @@ MODÜLLER:
 - "cashflow"  → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
 - "approval"  → Satın alma siparişi ONAYLAMA veya REDDETME
 - "crm"       → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
+- "lead"      → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
 - "support"   → SAP hata mesajları, nasıl yapılır soruları, teknik destek
 - "help"      → Yardım menüsü
 
-KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm
+KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
 
 YANIT (sadece JSON):
 {"intent":"cashflow","confidence":0.9,"reason":"kısa açıklama"}`;

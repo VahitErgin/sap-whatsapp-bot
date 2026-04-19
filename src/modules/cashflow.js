@@ -142,6 +142,10 @@ Stokta olup satışı olmayan ürünler:
 
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
+- Cari adından CardCode bulmak için BusinessPartners + başka endpoint şeklinde 2 sorgu YAZMA.
+  Bunun yerine tek sorguda cardName parametresi kullan — sistem CardCode'u otomatik çözer.
+  Örnek: Activities için cardName: "OKSİD" yaz; $filter içine CARDCODE_FROM_Q1 placeholder YAZMA.
+  Zorunlu durumlarda placeholder kullanacaksan: CARDCODE_FROM_Q1, CARDCODE_FROM_Q2 formatını koru.
 - Parametre yoksa params: {} bırak
 - Tarih belirtilmemişse refDate: "${new Date().toISOString().split('T')[0]}" kullan
 - Sadece JSON döndür, açıklama ekleme
@@ -403,9 +407,19 @@ async function buildQueryPlan(question, retries = 2) {
 // ─────────────────────────────────────────────────────────────
 async function executeQueries(sl, queries, dbName) {
   const results = {};
+  const resolvedCodes = {}; // queryId → CardCode (cross-query substitution için)
 
   for (const q of queries) {
     try {
+      // ── Cross-query substitution: CARDCODE_FROM_Qx placeholder'larını çöz ──
+      for (const key of Object.keys(q.params || {})) {
+        if (typeof q.params[key] === 'string') {
+          q.params[key] = q.params[key].replace(/CARDCODE_FROM_(Q\d+)/gi, (match, qId) => {
+            return resolvedCodes[qId.toUpperCase()] || match;
+          });
+        }
+      }
+
       // ── CardCode çözümleme: cardName varsa önce OCRD'den CardCode bul ──
       if (q.params?.cardName && !q.params?.cardCode) {
         const resolved = await resolveCardCode({
@@ -439,9 +453,53 @@ async function executeQueries(sl, queries, dbName) {
 
         } else {
           // Tek eşleşme → devam et
-          console.log(`[Cashflow] CardCode çözümlendi: "${q.params.cardName}" → ${resolved.record.CardCode}`);
-          q.params.cardCode = resolved.record.CardCode;
+          const cc = resolved.record.CardCode;
+          console.log(`[Cashflow] CardCode çözümlendi: "${q.params.cardName}" → ${cc}`);
+          q.params.cardCode = cc;
+          resolvedCodes[q.id.toUpperCase()] = cc;
+          // OData $filter'ı da güncelle (cardName placeholder yerine gerçek CardCode)
+          if (q.params['$filter']) {
+            q.params['$filter'] = q.params['$filter']
+              .replace(/contains\s*\(\s*CardName\s*,[^)]+\)/gi, `CardCode eq '${cc}'`)
+              .replace(/CardName\s+eq\s+'[^']*'/gi, `CardCode eq '${cc}'`);
+          } else {
+            q.params['$filter'] = `CardCode eq '${cc}'`;
+          }
+          delete q.params.cardName;
         }
+      }
+
+      // Activities endpoint: CardName $filter içinde geçersiz → CardCode'a çevir
+      if (q.endpoint === 'Activities' && q.params?.['$filter']) {
+        const filterStr = q.params['$filter'];
+        const nameMatch = filterStr.match(/contains\s*\(\s*CardName\s*,\s*'([^']+)'\s*\)/i)
+                       || filterStr.match(/CardName\s+eq\s+'([^']+)'/i);
+        if (nameMatch) {
+          const nameVal  = nameMatch[1];
+          const resolved = await resolveCardCode({ cardName: nameVal, dbName });
+          if (resolved.found === 'one') {
+            const cc = resolved.record.CardCode;
+            console.log(`[Cashflow] Activities CardName→CardCode: "${nameVal}" → ${cc}`);
+            q.params['$filter'] = filterStr
+              .replace(/contains\s*\(\s*CardName\s*,[^)]+\)/gi, `CardCode eq '${cc}'`)
+              .replace(/CardName\s+eq\s+'[^']*'/gi, `CardCode eq '${cc}'`);
+            resolvedCodes[q.id.toUpperCase()] = cc;
+          } else if (resolved.found === 'many') {
+            results[q.id] = { description: q.description, endpoint: q.endpoint,
+              data: resolved.records, count: resolved.records.length, error: 'multiple_matches' };
+            continue;
+          } else {
+            results[q.id] = { description: q.description, endpoint: q.endpoint,
+              data: [], count: 0, error: `"${nameVal}" adında cari bulunamadı` };
+            continue;
+          }
+        }
+      }
+
+      // Action/CardName field Activities GET sorgularında geçersiz — otomatik temizle
+      if (q.endpoint === 'Activities' && q.params?.['$select']) {
+        q.params['$select'] = q.params['$select'].split(',')
+          .filter(f => !['Action', 'CardName'].includes(f.trim())).join(',');
       }
 
       console.log(`[Cashflow] SAP → ${q.endpoint}`, q.params);
@@ -523,11 +581,17 @@ async function executeQueries(sl, queries, dbName) {
         }
       }
 
+      const dataArr = Array.isArray(data) ? data : [data];
+      // Sonraki sorgular için CardCode'u kaydet
+      if (dataArr.length === 1 && dataArr[0]?.CardCode) {
+        resolvedCodes[q.id.toUpperCase()] = dataArr[0].CardCode;
+      }
+
       results[q.id] = {
         description: q.description,
         endpoint:    q.endpoint,
-        data:        Array.isArray(data) ? data : [data],
-        count:       Array.isArray(data) ? data.length : 1,
+        data:        dataArr,
+        count:       dataArr.length,
         error:       null,
       };
     } catch (err) {

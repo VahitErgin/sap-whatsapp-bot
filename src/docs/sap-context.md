@@ -393,15 +393,19 @@ cardType: C = müşteri, S = tedarikçi
 | ActivityTime | Saat (HH:MM) |
 | Subject | Konu |
 | Notes | Detaylı not |
-| Action | phn=Telefon, mtg=Toplantı, tsk=Görev, nts=Not, cmp=Kampanya, otr=Diğer |
+| ActivityType | Aktivite tipi (1=Toplantı, 2=Telefon vb.) |
 | Closed | tYES=Kapalı / tNO=Açık |
 | HandledBy | Kullanıcı kodu |
 | ContactPersonCode | İlgili kişi kodu |
 
 #### Aktivite sorgula
 ```
-GET /Activities?$filter=CardCode eq 'MB00001'&$orderby=ActivityDate desc&$top=10
+GET /Activities?$filter=CardCode eq 'MB00001'&$select=ActivityCode,ActivityDate,ActivityTime,Subject,Notes,Closed,HandledBy&$orderby=ActivityDate desc&$top=10
 ```
+
+> **ÖNEMLİ**: Activities endpoint'inde `$filter` ve `$select` içinde `CardName` ve `Action` alanları GEÇERSİZDİR.
+> Firma adıyla sorgulama yaparken: `params.cardName` kullan (sistem otomatik CardCode'a çevirir).
+> `$filter` içine `contains(CardName,...)` veya `CardName eq '...'` YAZMA.
 
 #### Yeni aktivite ekle (POST)
 ```json

@@ -40,12 +40,12 @@ const ALL_TYPES = [
 // ─────────────────────────────────────────────────────────────
 async function getActivityTypes(dbName) {
   const sl   = getConnection(dbName || config.sap.companyDb);
-  const data = await sl.get('ActivityTypes', { '$orderby': 'Name' });
+  const data = await sl.get('ActivityTypes', {});
   return data?.value || [];
 }
 async function getActivitySubjects(dbName) {
   const sl   = getConnection(dbName || config.sap.companyDb);
-  const data = await sl.get('ActivitySubjects', { '$orderby': 'Name' });
+  const data = await sl.get('ActivitySubjects', {});
   return data?.value || [];
 }
 
@@ -110,25 +110,74 @@ async function handleWizardInput(from, text) {
   _refreshTTL(from, state);
 
   if (state.step === 'firm') {
-    if (text.trim() !== '*') {
-      state.cardName = text.trim();
-      try {
-        const resolved = await resolveCardCode({ cardName: state.cardName, dbName: state.dbName });
-        if (resolved.found === 'one') {
-          state.cardCode = resolved.record.CardCode;
-          state.cardName = resolved.record.CardName;
-        }
-      } catch { /* yoksay */ }
+    if (text.trim() === '*') {
+      // Atla → firma boş
+      state.step = 'type';
+      _wizard.set(_norm(from), state);
+      await _sendTypeList(from, '');
+      return;
     }
-    state.step = 'type';
-    _wizard.set(_norm(from), state);
-    await _sendTypeList(from, state.cardName);
+
+    const input = text.trim();
+    await sendText(from, '🔍 Muhatap aranıyor...');
+
+    // CardCode mi CardName mi? (boşluksuz, harf+rakam → code dene)
+    const isCodeLike = /^[A-Za-z]{1,6}\d+$/i.test(input);
+    if (isCodeLike) {
+      try {
+        const sl  = getConnection(state.dbName || config.sap.companyDb);
+        const res = await sl.get(`BusinessPartners('${input.toUpperCase()}')`, { $select: 'CardCode,CardName' });
+        if (res?.CardCode) {
+          state.cardCode = res.CardCode;
+          state.cardName = res.CardName;
+          state.step = 'type';
+          _wizard.set(_norm(from), state);
+          await _sendTypeList(from, res.CardName);
+          return;
+        }
+      } catch { /* CardCode bulunamadı, isimle ara */ }
+    }
+
+    // CardName ile ara
+    try {
+      const resolved = await resolveCardCode({ cardName: input, dbName: state.dbName });
+      if (resolved.found === 'one') {
+        state.cardCode = resolved.record.CardCode;
+        state.cardName = resolved.record.CardName;
+        state.step = 'type';
+        _wizard.set(_norm(from), state);
+        await _sendTypeList(from, state.cardName);
+        return;
+      } else if (resolved.found === 'many') {
+        // Çoklu eşleşme → seçim listesi göster, step değişmez
+        _wizard.set(_norm(from), state);
+        await _sendFirmSelectionList(from, resolved.records);
+        return;
+      }
+    } catch { /* yoksay */ }
+
+    // Bulunamadı → bildir, tekrar dene
+    await sendText(from, `⚠️ *"${input}"* bulunamadı.\n\nTekrar deneyin veya * ile atlayın.`);
 
   } else if (state.step === 'note') {
     state.notes = text.trim();
     _wizard.delete(_norm(from));
     await _showSummary(from, state);
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// handleWizardFirmSelection — ACT_FIRM:CardCode|CardName
+// ─────────────────────────────────────────────────────────────
+async function handleWizardFirmSelection(from, cardCode, cardName) {
+  const state = getWizardState(from);
+  if (!state) return;
+  state.cardCode = cardCode;
+  state.cardName = cardName;
+  state.step     = 'type';
+  _refreshTTL(from, state);
+  _wizard.set(_norm(from), state);
+  await _sendTypeList(from, cardName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -234,6 +283,17 @@ async function confirmActivity(from) {
 // ─────────────────────────────────────────────────────────────
 // Yardımcılar
 // ─────────────────────────────────────────────────────────────
+
+async function _sendFirmSelectionList(from, records) {
+  const rows = (records || []).slice(0, 10).map(r => ({
+    id:          `ACT_FIRM:${r.CardCode}|${String(r.CardName).substring(0, 60)}`,
+    title:       r.CardCode,
+    description: String(r.CardName).substring(0, 72),
+  }));
+  await sendList(from, '🔍 Muhatap Seçin', 'Birden fazla cari bulundu, seçin:', 'Seç',
+    [{ title: 'Cariler', rows }]
+  );
+}
 
 async function _sendTypeList(from, cardName) {
   const activeTypes = _getAdminTypes();
@@ -343,14 +403,164 @@ function _norm(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
+// ─────────────────────────────────────────────────────────────
+// LEAD WIZARD — Aday müşteri (BusinessPartner Lead) ekleme
+// Adımlar: vergi → name → phone → confirm
+// ─────────────────────────────────────────────────────────────
+const _leadWizard  = new Map();
+const LEAD_WIZ_TTL = 10 * 60 * 1000;
+
+function getLeadWizardState(phone) {
+  const k = _norm(phone);
+  const e = _leadWizard.get(k);
+  if (!e) return null;
+  if (e.expiresAt < Date.now()) { _leadWizard.delete(k); return null; }
+  return e;
+}
+
+function _refreshLeadTTL(phone, state) {
+  state.expiresAt = Date.now() + LEAD_WIZ_TTL;
+  _leadWizard.set(_norm(phone), state);
+}
+
+async function handleCreateLead({ from, session, dbName }) {
+  const state = {
+    step:      'vergi',
+    session,
+    dbName,
+    federalTaxId: '',
+    cardName:     '',
+    phone1:       '',
+    expiresAt:    Date.now() + LEAD_WIZ_TTL,
+  };
+  _leadWizard.set(_norm(from), state);
+  await sendText(from,
+    `🆕 *Aday Müşteri Ekle*\n\n` +
+    `1️⃣ Vergi No / TC Kimlik No girin:\n` +
+    `_(Atlamak için * yazın)_`
+  );
+}
+
+async function handleLeadWizardInput(from, text) {
+  const state = getLeadWizardState(from);
+  if (!state) return;
+  _refreshLeadTTL(from, state);
+  const val = text.trim();
+
+  if (state.step === 'vergi') {
+    if (val !== '*' && val.length > 0) {
+      // SAP'ta aynı vergi numarası var mı?
+      try {
+        const sl  = getConnection(state.dbName || config.sap.companyDb);
+        const res = await sl.get('BusinessPartners', {
+          '$filter': `VatIdUnCmp eq '${val}' or LicTradNum eq '${val}'`,
+          '$select': 'CardCode,CardName,CardType',
+          '$top':    '1',
+        });
+        const found = res?.value?.[0];
+        if (found) {
+          _leadWizard.delete(_norm(from));
+          return await sendText(from,
+            `⚠️ *Bu vergi numarası sistemde kayıtlı:*\n\n` +
+            `🏢 ${found.CardName}\n` +
+            `🔑 ${found.CardCode}\n\n` +
+            `Farklı bir vergi numarasıyla tekrar deneyin veya mevcut kaydı güncelleyin.`
+          );
+        }
+      } catch { /* kontrol edilemedi, devam et */ }
+      state.federalTaxId = val;
+    }
+    state.step = 'name';
+    _leadWizard.set(_norm(from), state);
+    return await sendText(from, `2️⃣ Firma / Kişi adını girin:`);
+  }
+
+  if (state.step === 'name') {
+    if (!val || val === '*') {
+      return await sendText(from, `⚠️ Firma adı zorunludur. Lütfen girin:`);
+    }
+    state.cardName = val;
+    state.step     = 'phone';
+    _leadWizard.set(_norm(from), state);
+    return await sendText(from, `3️⃣ Telefon numarası girin:\n_(Atlamak için * yazın)_`);
+  }
+
+  if (state.step === 'phone') {
+    if (val !== '*') state.phone1 = val;
+    _leadWizard.delete(_norm(from));
+    await _showLeadSummary(from, state);
+  }
+}
+
+async function _showLeadSummary(from, state) {
+  const lines = [
+    `🏢 *Firma Adı:* ${state.cardName}`,
+    state.federalTaxId ? `🪪 *Vergi No:* ${state.federalTaxId}` : '',
+    state.phone1       ? `📞 *Telefon:* ${state.phone1}`         : '',
+    `👤 *Ekleyen:* ${state.session.userName}`,
+  ].filter(Boolean).join('\n');
+
+  _pendingActivity.set(_norm(from), {
+    type:    'lead',
+    leadData: { ...state },
+    dbName:  state.dbName,
+    expiresAt: Date.now() + PENDING_TTL,
+  });
+
+  await sendButtons(from, '✅ Aday Müşteri Özeti', lines, [
+    { id: 'LEAD_SAVE',   title: '💾 Kaydet' },
+    { id: 'LEAD_CANCEL', title: '🚫 İptal'  },
+  ]);
+}
+
+async function confirmLead(from) {
+  const pending = _pendingActivity.get(_norm(from));
+  _pendingActivity.delete(_norm(from));
+
+  if (!pending || pending.type !== 'lead') {
+    return await sendText(from, '⚠️ Kaydedilecek aday müşteri bulunamadı. Lütfen tekrar deneyin.');
+  }
+
+  const { leadData, dbName } = pending;
+  try {
+    const sl      = getConnection(dbName || config.sap.companyDb);
+    const payload = {
+      CardType: 'cLid',
+      CardName: leadData.cardName,
+    };
+    if (leadData.federalTaxId) payload.FederalTaxID = leadData.federalTaxId;
+    if (leadData.phone1)       payload.Phone1       = leadData.phone1;
+
+    const result = await sl.post('BusinessPartners', payload);
+    const newCode = result?.CardCode || '—';
+
+    await sendText(from,
+      `✅ *Aday müşteri eklendi!*\n\n` +
+      `🏢 ${leadData.cardName}\n` +
+      `🔑 Kod: ${newCode}\n` +
+      `👤 Ekleyen: ${leadData.session.userName}`
+    );
+    console.log(`[CRM] Lead eklendi: ${leadData.cardName} (${newCode}) by ${leadData.session.userName}`);
+  } catch (err) {
+    console.error('[CRM] Lead kayıt hatası:', err.message);
+    await sendText(from, `⚠️ SAP'a kaydedilemedi: ${err.message}`);
+  }
+}
+
 module.exports = {
   handleCreateActivity,
   handleWizardInput,
   handleWizardTypeSelection,
   handleWizardCategorySelection,
   handleWizardSubjectSelection,
+  handleWizardFirmSelection,
   getWizardState,
   confirmActivity,
   getActivityTypes,
   getActivitySubjects,
+  // Lead wizard
+  handleCreateLead,
+  handleLeadWizardInput,
+  getLeadWizardState,
+  confirmLead,
 };
