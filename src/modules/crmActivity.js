@@ -66,27 +66,59 @@ YANIT FORMATI (sadece JSON):
 
 Eksik bilgi için makul varsayım yap, sormadan devam et.`;
 
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      system:     systemPrompt,
-      messages:   [{ role: 'user', content: text }],
-    },
-    {
-      headers: {
-        'x-api-key':         config.anthropic.apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type':      'application/json',
+  try {
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: text }],
       },
-      timeout: 15000,
-    }
-  );
+      {
+        headers: {
+          'x-api-key':         config.anthropic.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type':      'application/json',
+        },
+        timeout: 15000,
+      }
+    );
 
-  const raw      = response.data?.content?.filter(b => b.type === 'text')?.map(b => b.text)?.join('') || '{}';
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch ? jsonMatch[0] : '{}');
+    const raw      = response.data?.content?.filter(b => b.type === 'text')?.map(b => b.text)?.join('') || '{}';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    return JSON.parse(jsonMatch ? jsonMatch[0] : '{}');
+  } catch (err) {
+    console.warn('[CRM] Claude parse başarısız, regex fallback:', err.message);
+    return _regexParseActivity(text, today);
+  }
+}
+
+// Regex tabanlı yedek parser — Claude erişilemez olduğunda devreye girer
+function _regexParseActivity(text, today) {
+  const t = text.toLowerCase();
+
+  // Aktivite tipi
+  let action = 'Phone Call';
+  if (/(toplantı|görüşme|ziyaret|buluştuk)/.test(t))       action = 'Meeting';
+  else if (/(görev|yapılacak|hatırlatma|remind)/.test(t))   action = 'Task';
+  else if (/(not|kaydet|yazdım)/.test(t))                   action = 'Note';
+  else if (/(mail|e-posta|eposta)/.test(t))                 action = 'Email';
+
+  // Firma adı: "X ile", "X firması", "X şirketi" kalıpları
+  let cardName = '';
+  const companyMatch = text.match(/^([A-ZÇĞİÖŞÜa-zçğışöşü0-9\s]+?)\s+(ile|firması|şirketi|a\.ş\.|ltd)\b/i)
+    || text.match(/\b([A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğışöşü]{2,}(?:\s+[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğışöşü]{1,})*)\s+ile\b/i);
+  if (companyMatch) cardName = companyMatch[1].trim();
+
+  return {
+    cardName:     cardName || null,
+    action,
+    subjectCode:  null,
+    notes:        text.trim(),
+    activityDate: today,
+    details:      '',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
