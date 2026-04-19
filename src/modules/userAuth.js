@@ -1,6 +1,6 @@
 'use strict';
 
-const { getUserByPhone } = require('./sapDb');
+const { getUserByPhone, getCustomerByPhone } = require('./sapDb');
 const { getConnection }  = require('./sapClient');
 const config             = require('../config/config');
 
@@ -58,35 +58,54 @@ async function resolveUser(phone, dbName) {
   const cached = _cache.get(phone10);
   if (cached && cached.expiresAt > Date.now()) return cached.user;
 
-  // 1. OUSR: telefon → USER_CODE
+  // 1. OUSR: telefon → SAP dahili kullanıcı (çalışan)
   const ousr = await getUserByPhone(phone10, dbName);
-  if (!ousr) {
-    _cache.set(phone10, { user: null, expiresAt: Date.now() + CACHE_TTL });
-    return null;
+  if (ousr) {
+    let license = 'Professional';
+    try {
+      const sl       = getConnection(dbName || config.sap.companyDb);
+      const userData = await sl.get(`Users('${ousr.USER_CODE}')`);
+      license        = userData.UserLicense || 'Professional';
+    } catch (err) {
+      console.warn(`[UserAuth] SL lisans alınamadı (${ousr.USER_CODE}):`, err.message);
+    }
+
+    const licCfg = LICENSE_CONFIG[license] || DEFAULT_CONFIG;
+    const user = {
+      userCode:            ousr.USER_CODE,
+      name:                ousr.U_NAME || ousr.USER_CODE,
+      license,
+      isCustomer:          false,
+      customerCardCode:    null,
+      allowedIntents:      licCfg.allowedIntents,
+      cashflowRestriction: licCfg.cashflowRestriction,
+    };
+
+    _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
+    console.log(`[UserAuth] ${phone10} → ${user.userCode} (${license})`);
+    return user;
   }
 
-  // 2. Service Layer: USER_CODE → UserLicense
-  let license = 'Professional';
-  try {
-    const sl       = getConnection(dbName || config.sap.companyDb);
-    const userData = await sl.get(`Users('${ousr.USER_CODE}')`);
-    license        = userData.UserLicense || 'Professional';
-  } catch (err) {
-    console.warn(`[UserAuth] SL lisans alınamadı (${ousr.USER_CODE}):`, err.message);
+  // 2. OCPR: telefon → müşteri ilgili kişi (harici kullanıcı)
+  const ocpr = await getCustomerByPhone(phone10, dbName);
+  if (ocpr) {
+    const user = {
+      userCode:            null,
+      name:                ocpr.ContactName || ocpr.CardName || phone10,
+      license:             'Customer',
+      isCustomer:          true,
+      customerCardCode:    ocpr.CardCode,
+      allowedIntents:      ['cashflow', 'support', 'help'],
+      cashflowRestriction: null,
+    };
+
+    _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
+    console.log(`[UserAuth] ${phone10} → Müşteri ${ocpr.CardCode} (${ocpr.CardName})`);
+    return user;
   }
 
-  const licCfg = LICENSE_CONFIG[license] || DEFAULT_CONFIG;
-  const user = {
-    userCode:            ousr.USER_CODE,
-    name:                ousr.U_NAME || ousr.USER_CODE,
-    license,
-    allowedIntents:      licCfg.allowedIntents,
-    cashflowRestriction: licCfg.cashflowRestriction,
-  };
-
-  _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
-  console.log(`[UserAuth] ${phone10} → ${user.userCode} (${license})`);
-  return user;
+  _cache.set(phone10, { user: null, expiresAt: Date.now() + CACHE_TTL });
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────

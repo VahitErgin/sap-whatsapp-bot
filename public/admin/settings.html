@@ -189,6 +189,38 @@
         </div>
       </div>
 
+      <!-- CRM & Oturum Ayarları -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-people me-2" style="color:#6cb2eb"></i>CRM & Oturum Ayarları</div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">Oturum Süresi (dakika)</label>
+                <input type="number" class="form-control form-control-sm" id="sessionTimeout" min="30" max="1440" placeholder="480">
+                <div class="form-text">Varsayılan: 480 dk (8 saat)</div>
+              </div>
+              <div class="col-md-9">
+                <label class="form-label fw-semibold small">Aktif Aktivite Tipleri</label>
+                <div class="d-flex flex-wrap gap-2 pt-1" id="crmTypesCheck">
+                  <!-- JS ile doldurulur -->
+                </div>
+                <div class="form-text">Seçilenler WhatsApp'ta kullanılabilir aktivite tipleri olarak sunulur.</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small">Aktivite Konuları <span class="text-muted fw-normal">(virgülle ayırın, boş bırakılırsa konu sorulmaz)</span></label>
+                <input type="text" class="form-control form-control-sm" id="crmSubjects" placeholder="Teklif, Sipariş Takip, Teknik Destek, Şikayet">
+              </div>
+              <div class="col-12">
+                <button class="btn btn-primary btn-sm" onclick="saveCrmSettings()">
+                  <i class="bi bi-floppy me-1"></i>CRM Ayarlarını Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Şifre Değiştir -->
       <div class="col-md-6">
         <div class="card h-100">
@@ -246,6 +278,8 @@ async function loadStatus() {
   sel.innerHTML = dbs.map(d => `<option value="${d}">${d}</option>`).join('');
 }
 
+const ALL_ACTIVITY_TYPES = ['Phone Call', 'Meeting', 'Task', 'Note', 'Email'];
+
 async function loadSettings() {
   const res  = await fetch('/admin/api/settings');
   const data = await res.json();
@@ -263,6 +297,48 @@ async function loadSettings() {
   document.getElementById('sqlUser').value   = data.SAP_DB_USER   || '';
   document.getElementById('sqlPasswordStatus').textContent =
     data.SAP_DB_PASSWORD_SET ? '✓ Şifre kayıtlı (değiştirmek için yeni şifre gir)' : '⚠ Şifre tanımlı değil';
+
+  // CRM & Oturum
+  document.getElementById('sessionTimeout').value = data.SESSION_TIMEOUT_MINUTES || '480';
+  document.getElementById('crmSubjects').value    = data.CRM_ACTIVE_SUBJECTS     || '';
+
+  const activeTypes = (data.CRM_ACTIVE_TYPES || '').split(',').map(t => t.trim()).filter(Boolean);
+  const container   = document.getElementById('crmTypesCheck');
+  container.innerHTML = ALL_ACTIVITY_TYPES.map(type => {
+    const checked = activeTypes.length === 0 || activeTypes.includes(type) ? 'checked' : '';
+    const id      = 'crmType_' + type.replace(/\s/g, '_');
+    return `<div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="${id}" value="${type}" ${checked}>
+      <label class="form-check-label small" for="${id}">${type}</label>
+    </div>`;
+  }).join('');
+}
+
+async function saveCrmSettings() {
+  const timeout  = document.getElementById('sessionTimeout').value.trim();
+  const subjects = document.getElementById('crmSubjects').value.trim();
+  const checked  = [...document.querySelectorAll('#crmTypesCheck input:checked')].map(el => el.value);
+
+  if (!timeout || isNaN(Number(timeout)) || Number(timeout) < 1) {
+    return showAlert('Geçersiz oturum süresi', 'danger');
+  }
+
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      SESSION_TIMEOUT_MINUTES: timeout,
+      CRM_ACTIVE_TYPES:        checked.join(','),
+      CRM_ACTIVE_SUBJECTS:     subjects,
+    }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showAlert('CRM ayarları kaydedildi');
+    loadSettings();
+  } else {
+    showAlert(data.error, 'danger');
+  }
 }
 
 async function saveSqlSettings() {

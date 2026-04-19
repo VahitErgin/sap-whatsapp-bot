@@ -179,14 +179,17 @@ router.delete('/api/templates/:name', requireAuth, async (req, res) => {
 router.get('/api/settings', requireAuth, (req, res) => {
   const env = readEnv();
   res.json({
-    WA_PHONE_NUMBER_ID:    env.WA_PHONE_NUMBER_ID || '',
-    WA_VERIFY_TOKEN:       env.WA_VERIFY_TOKEN    || '',
-    WA_ACCESS_TOKEN_SET:   !!env.WA_ACCESS_TOKEN,
-    ANTHROPIC_API_KEY_SET: !!env.ANTHROPIC_API_KEY,
-    SAP_DB_SERVER:         env.SAP_DB_SERVER      || '',
-    SAP_DB_NAME:           env.SAP_DB_NAME        || '',
-    SAP_DB_USER:           env.SAP_DB_USER        || '',
-    SAP_DB_PASSWORD_SET:   !!env.SAP_DB_PASSWORD,
+    WA_PHONE_NUMBER_ID:      env.WA_PHONE_NUMBER_ID      || '',
+    WA_VERIFY_TOKEN:         env.WA_VERIFY_TOKEN          || '',
+    WA_ACCESS_TOKEN_SET:     !!env.WA_ACCESS_TOKEN,
+    ANTHROPIC_API_KEY_SET:   !!env.ANTHROPIC_API_KEY,
+    SAP_DB_SERVER:           env.SAP_DB_SERVER            || '',
+    SAP_DB_NAME:             env.SAP_DB_NAME              || '',
+    SAP_DB_USER:             env.SAP_DB_USER              || '',
+    SAP_DB_PASSWORD_SET:     !!env.SAP_DB_PASSWORD,
+    SESSION_TIMEOUT_MINUTES: env.SESSION_TIMEOUT_MINUTES  || '480',
+    CRM_ACTIVE_TYPES:        env.CRM_ACTIVE_TYPES         || '',
+    CRM_ACTIVE_SUBJECTS:     env.CRM_ACTIVE_SUBJECTS      || '',
   });
 });
 
@@ -194,24 +197,34 @@ router.post('/api/settings', requireAuth, (req, res) => {
   const allowed = [
     'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY',
     'SAP_DB_SERVER', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
+    'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS',
   ];
   const updates = {};
   for (const key of allowed) {
-    if (req.body[key]) updates[key] = req.body[key];
+    // Şifre/token alanları: boş gelirse atla; diğerleri: boş string de kaydedilebilir (örn. CRM_ACTIVE_SUBJECTS)
+    const sensitiveKeys = ['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'SAP_DB_PASSWORD'];
+    if (sensitiveKeys.includes(key)) {
+      if (req.body[key]) updates[key] = req.body[key];
+    } else if (req.body[key] !== undefined) {
+      updates[key] = req.body[key];
+    }
   }
   if (!Object.keys(updates).length) return res.status(400).json({ error: 'Güncellenecek alan yok' });
 
   updateEnv(updates);
 
-  // Runtime'da config nesnesini güncelle (yeniden başlatma gerektirmez)
-  if (updates.WA_ACCESS_TOKEN)    config.whatsapp.accessToken   = updates.WA_ACCESS_TOKEN;
-  if (updates.WA_PHONE_NUMBER_ID) config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
-  if (updates.WA_VERIFY_TOKEN)    config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
-  if (updates.ANTHROPIC_API_KEY)  config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
-  if (updates.SAP_DB_SERVER)      config.sapDb.server           = updates.SAP_DB_SERVER;
-  if (updates.SAP_DB_NAME)        config.sapDb.database         = updates.SAP_DB_NAME;
-  if (updates.SAP_DB_USER)        config.sapDb.user             = updates.SAP_DB_USER;
-  if (updates.SAP_DB_PASSWORD)    config.sapDb.password         = updates.SAP_DB_PASSWORD;
+  // Runtime güncelle (yeniden başlatma gerektirmez)
+  if (updates.WA_ACCESS_TOKEN)        config.whatsapp.accessToken   = updates.WA_ACCESS_TOKEN;
+  if (updates.WA_PHONE_NUMBER_ID)     config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
+  if (updates.WA_VERIFY_TOKEN)        config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
+  if (updates.ANTHROPIC_API_KEY)      config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
+  if (updates.SAP_DB_SERVER)          config.sapDb.server           = updates.SAP_DB_SERVER;
+  if (updates.SAP_DB_NAME)            config.sapDb.database         = updates.SAP_DB_NAME;
+  if (updates.SAP_DB_USER)            config.sapDb.user             = updates.SAP_DB_USER;
+  if (updates.SAP_DB_PASSWORD)        config.sapDb.password         = updates.SAP_DB_PASSWORD;
+  if (updates.SESSION_TIMEOUT_MINUTES) process.env.SESSION_TIMEOUT_MINUTES = updates.SESSION_TIMEOUT_MINUTES;
+  if (updates.CRM_ACTIVE_TYPES !== undefined)    process.env.CRM_ACTIVE_TYPES    = updates.CRM_ACTIVE_TYPES;
+  if (updates.CRM_ACTIVE_SUBJECTS !== undefined) process.env.CRM_ACTIVE_SUBJECTS = updates.CRM_ACTIVE_SUBJECTS;
 
   res.json({ ok: true });
 });

@@ -427,6 +427,26 @@ async function getOnayBekleyenler({ dbName } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// OCPR İlgili Kişiler: Cellolar/Tel1/Tel2 → CardCode bul
+// ─────────────────────────────────────────────────────────────
+async function getCustomerByPhone(phone10, dbName) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('Phone', sql.NVarChar(20), `%${phone10}`);
+
+  const result = await request.query(`
+    SELECT TOP 1 c.CardCode, c.Name AS ContactName, bp.CardName
+    FROM OCPR c WITH(NOLOCK)
+    LEFT JOIN OCRD bp WITH(NOLOCK) ON c.CardCode = bp.CardCode
+    WHERE c.Cellolar LIKE @Phone
+       OR c.Tel1     LIKE @Phone
+       OR c.Tel2     LIKE @Phone
+  `);
+
+  return result.recordset[0] || null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Telefon numarasına göre OUSR kaydını getir
 // ─────────────────────────────────────────────────────────────
 async function getUserByPhone(phone10, dbName) {
@@ -443,4 +463,138 @@ async function getUserByPhone(phone10, dbName) {
   return result.recordset[0] || null;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone };
+// ─────────────────────────────────────────────────────────────
+// Ürün kategorisine göre satış tutarları — OINV + INV1 + OITM + OITB
+// ─────────────────────────────────────────────────────────────
+async function getSatisByKategori({ startDate, endDate, top = 5, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('StartDate', sql.Date, startDate);
+  request.input('EndDate',   sql.Date, endDate);
+  request.input('Top',       sql.Int,  Number(top));
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      ISNULL(g.ItmsGrpNam, 'Diğer')        AS Kategori,
+      ISNULL(s.SlpName, 'Belirtilmemiş')    AS SatisTemsilcisi,
+      SUM(l.LineTotal)                       AS ToplamSatis,
+      COUNT(DISTINCT h.DocEntry)             AS BelgeSayisi
+    FROM OINV h WITH(NOLOCK)
+    INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry  = l.DocEntry
+    LEFT  JOIN OITM i WITH(NOLOCK) ON l.ItemCode   = i.ItemCode
+    LEFT  JOIN OITB g WITH(NOLOCK) ON i.ItmsGrpCod = g.ItmsGrpCod
+    LEFT  JOIN OSLP s WITH(NOLOCK) ON h.SlpCode    = s.SlpCode
+    WHERE h.DocDate >= @StartDate
+      AND h.DocDate <= @EndDate
+      AND h.CANCELED = 'N'
+    GROUP BY g.ItmsGrpNam, s.SlpName
+    ORDER BY ToplamSatis DESC
+  `);
+
+  return result.recordset;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Marka bazlı satış tutarları — OINV + INV1 + OITM (U_BE1_MARKAKODU)
+// ─────────────────────────────────────────────────────────────
+async function getSatisByMarka({ startDate, endDate, top = 5, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('StartDate', sql.Date, startDate);
+  request.input('EndDate',   sql.Date, endDate);
+  request.input('Top',       sql.Int,  Number(top));
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      ISNULL(i.U_BE1_MARKAKODU, 'Belirtilmemiş') AS Marka,
+      ISNULL(s.SlpName, 'Belirtilmemiş')          AS SatisTemsilcisi,
+      SUM(l.LineTotal)                             AS ToplamSatis,
+      COUNT(DISTINCT h.DocEntry)                   AS BelgeSayisi
+    FROM OINV h WITH(NOLOCK)
+    INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
+    LEFT  JOIN OITM i WITH(NOLOCK) ON l.ItemCode  = i.ItemCode
+    LEFT  JOIN OSLP s WITH(NOLOCK) ON h.SlpCode   = s.SlpCode
+    WHERE h.DocDate >= @StartDate
+      AND h.DocDate <= @EndDate
+      AND h.CANCELED = 'N'
+    GROUP BY i.U_BE1_MARKAKODU, s.SlpName
+    ORDER BY ToplamSatis DESC
+  `);
+
+  return result.recordset;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Satış temsilcisi bazlı satış tutarları — OINV + OSLP
+// ─────────────────────────────────────────────────────────────
+async function getSatisByTemsilci({ startDate, endDate, top = 10, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('StartDate', sql.Date, startDate);
+  request.input('EndDate',   sql.Date, endDate);
+  request.input('Top',       sql.Int,  Number(top));
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      ISNULL(s.SlpName, 'Belirtilmemiş') AS SatisTemsilcisi,
+      SUM(h.DocTotal)                     AS ToplamSatis,
+      COUNT(h.DocEntry)                   AS BelgeSayisi
+    FROM OINV h WITH(NOLOCK)
+    LEFT JOIN OSLP s WITH(NOLOCK) ON h.SlpCode = s.SlpCode
+    WHERE h.DocDate >= @StartDate
+      AND h.DocDate <= @EndDate
+      AND h.CANCELED = 'N'
+    GROUP BY s.SlpName
+    ORDER BY ToplamSatis DESC
+  `);
+
+  return result.recordset;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Stokta olan ama belirtilen dönemde satışı olmayan ürünler
+// startDate/endDate verilmezse tüm zamanlar kontrol edilir
+// ─────────────────────────────────────────────────────────────
+async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('Top', sql.Int, Number(top));
+
+  let dateFilter = '';
+  if (startDate && endDate) {
+    request.input('StartDate', sql.Date, startDate);
+    request.input('EndDate',   sql.Date, endDate);
+    dateFilter = 'AND h.DocDate >= @StartDate AND h.DocDate <= @EndDate';
+  }
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      i.ItemCode,
+      i.ItemName                             AS UrunAdi,
+      ISNULL(g.ItmsGrpNam, 'Diğer')         AS Kategori,
+      ISNULL(i.U_BE1_MARKAKODU, '')          AS Marka,
+      SUM(ISNULL(w.OnHand, 0))               AS StokMiktari,
+      i.SalUnitMsr                           AS Birim
+    FROM OITM i WITH(NOLOCK)
+    LEFT JOIN OITW w WITH(NOLOCK) ON i.ItemCode    = w.ItemCode
+    LEFT JOIN OITB g WITH(NOLOCK) ON i.ItmsGrpCod  = g.ItmsGrpCod
+    WHERE i.InvntItem = 'Y'
+      AND i.Canceled  = 'N'
+      AND i.validFor  = 'Y'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM INV1 l WITH(NOLOCK)
+        INNER JOIN OINV h WITH(NOLOCK) ON l.DocEntry = h.DocEntry
+        WHERE l.ItemCode  = i.ItemCode
+          AND h.CANCELED  = 'N'
+          ${dateFilter}
+      )
+    GROUP BY i.ItemCode, i.ItemName, g.ItmsGrpNam, i.U_BE1_MARKAKODU, i.SalUnitMsr
+    HAVING SUM(ISNULL(w.OnHand, 0)) > 0
+    ORDER BY StokMiktari DESC
+  `);
+
+  return result.recordset;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz };

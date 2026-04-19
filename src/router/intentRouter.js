@@ -20,6 +20,9 @@ const axios  = require('axios');
 const config = require('../config/config');
 const { sendText } = require('../services/whatsappService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
+const { loginUser }  = require('../modules/sapAuth');
+const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
+const { handleCreateActivity, confirmActivity } = require('../modules/crmActivity');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
@@ -36,66 +39,67 @@ Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini belir
 MODÜLLER:
 - "cashflow"  → SAP veri sorguları ve listeleme: bakiye, fatura, stok, nakit akışı, cari bilgisi, sipariş listesi, ödeme, tahsilat, raporlar, veri görüntüleme
 - "approval"  → Satın alma SİPARİŞİ ONAYLAMA veya REDDETME aksiyonu (aksiyon kelimesi gerekir)
+- "crm"       → Aktivite OLUŞTURMA: toplantı notu, telefon görüşmesi kaydı, görev ekleme, aktivite ekle
+- "login"     → Sisteme giriş: "giriş yap", "login", "oturum aç"
+- "logout"    → Çıkış: "çıkış yap", "logout", "oturumu kapat"
 - "support"   → SAP hata mesajları, nasıl yapılır soruları, menü yolları, teknik destek
 - "help"      → Genel yardım menüsü istekleri (yardım, menü, ne yapabilirsin gibi)
 
-KRİTİK AYRIMI — cashflow vs approval:
-- Kullanıcı sadece LİSTELEMEK / GÖRMEK istiyorsa → cashflow
-  Örnekler: "bekleyen siparişler", "siparişleri getir", "siparişleri göster", "açık siparişler"
-- Kullanıcı ONAYLAMAK veya REDDETMEK istiyorsa → approval
-  Örnekler: "siparişi onayla", "siparişi reddet", "onay ver", "onaylıyorum"
+KRİTİK AYRIMI:
+- Aktivite GÖRME/LİSTELEME → cashflow | Aktivite OLUŞTURMA/EKLEME → crm
+- Sipariş GÖRME → cashflow | Sipariş ONAYLAMA → approval
 
 YANIT FORMATI (sadece JSON):
 {
-  "intent": "cashflow" | "approval" | "support" | "help",
+  "intent": "cashflow" | "approval" | "crm" | "login" | "logout" | "support" | "help",
   "confidence": 0.0-1.0,
   "reason": "Kısa açıklama"
 }
 
 ÖRNEKLER:
 - "C001 bakiyesi nedir" → cashflow
-- "Bu hafta vadesi gelen ödemeler" → cashflow
 - "Stokta vida var mı" → cashflow
-- "Stok bakiyesi en yüksekten 5 kalem getir" → cashflow
-- "En çok stokta olan ürünler" → cashflow
-- "Stok durumu listele" → cashflow
-- "Hangi ürünlerin stoğu az" → cashflow
-- "Fatura listesi" → cashflow
-- "Son faturaları getir" → cashflow
-- "MB00006 müşterisinin servis çağrıları" → cashflow
-- "Açık servis çağrıları" → cashflow
-- "SN12345 seri nolu cihazın durumu" → cashflow
-- "Teknik servis durumu" → cashflow
-- "Hizmet çağrısı 14 nedir" → cashflow
-- "Bekleyen siparişler neler" → cashflow (listeleme)
-- "Bekleyen siparişlerden 5 tanesi ver" → cashflow (listeleme)
-- "Açık satın alma siparişleri" → cashflow (listeleme)
-- "MB00001'e aktivite ekle, bugün telefon görüşmesi yaptık" → cashflow
-- "Yeni aday müşteri ekle: ABC Teknoloji, 05001234567" → cashflow
-- "Açık satış fırsatları" → cashflow
 - "MB00001'in aktiviteleri" → cashflow
-- "Yeni fırsat ekle" → cashflow
-- "456 numaralı siparişi onayla" → approval (onay aksiyonu)
-- "Siparişi reddet" → approval (red aksiyonu)
+- "ABC ile bugün toplantı yaptık, teklif konuştuk" → crm
+- "Telefon görüşmesi ekle: Endeks firmasını aradım" → crm
+- "Aktivite oluştur" → crm
+- "456 numaralı siparişi onayla" → approval
+- "Giriş yap" → login
+- "Çıkış yap" → logout
 - "-10 hatası aldım" → support
-- "Fatura nasıl iptal edilir" → support
-- "SAP'ta dönem nasıl kapatılır" → support
-- "Yardım" → help
-- "Ne yapabilirsin" → help
-
-NOT: Kullanıcı "getir", "listele", "göster", "ver", "kaç tane" gibi kelimeler kullanıyorsa → cashflow.
-     Kullanıcı "nasıl", "nerede", "ne zaman", "hata" gibi kelimeler kullanıyorsa → support.`;
+- "Yardım" → help`;
 
 // ─────────────────────────────────────────────────────────────
 // Ana yönlendirici
 // ─────────────────────────────────────────────────────────────
 async function handleIncoming({ from, text }) {
   getModules();
-
   const upper = text.toUpperCase().trim();
 
   try {
-    // ── 1. Yetki kontrolü ────────────────────────────────────
+    // ── 1. Şifre bekleme modu — Claude'a gitmeden yakala ─────
+    const awaitingPw = getAwaitingPassword(from);
+    if (awaitingPw) {
+      clearAwaitingPassword(from);
+      const result = await loginUser(awaitingPw.userCode, text.trim());
+      if (result.success) {
+        createSession(from, {
+          userCode:   awaitingPw.userCode,
+          employeeId: result.employeeId,
+          userName:   awaitingPw.userName,
+        });
+        const ttl = Math.round(parseInt(process.env.SESSION_TIMEOUT_MINUTES || '480') / 60);
+        return await sendText(from,
+          `✅ *Giriş başarılı!*\n\n` +
+          `Hoş geldiniz, *${awaitingPw.userName}*\n` +
+          `Oturum ${ttl} saat geçerli.\n\n` +
+          `Aktivite oluşturmak için doğal dille yazabilirsiniz.\nÖrnek: _"ABC ile toplantı yaptık, teklif konuştuk"_`
+        );
+      }
+      return await sendText(from, `❌ *Giriş başarısız*\n\n${result.error}\n\nTekrar denemek için *giriş yap* yazın.`);
+    }
+
+    // ── 2. Yetki kontrolü (OUSR veya OCPR) ───────────────────
     const user = await resolveUser(from);
     if (!user) {
       return await sendText(from,
@@ -105,14 +109,12 @@ async function handleIncoming({ from, text }) {
       );
     }
 
-    // ── 2. Buton / liste cevapları → direkt yönlendir ────────
+    // ── 3. Buton cevapları → direkt yönlendir ────────────────
     if (upper.startsWith('APPROVE:')) {
-      const docEntry = upper.replace('APPROVE:', '').trim();
-      return await approval.confirmApproval({ from, docEntry, action: 'approve' });
+      return await approval.confirmApproval({ from, docEntry: upper.replace('APPROVE:', '').trim(), action: 'approve' });
     }
     if (upper.startsWith('REJECT:')) {
-      const docEntry = upper.replace('REJECT:', '').trim();
-      return await approval.confirmApproval({ from, docEntry, action: 'reject' });
+      return await approval.confirmApproval({ from, docEntry: upper.replace('REJECT:', '').trim(), action: 'reject' });
     }
     if (text.startsWith('CARI_SEL:')) {
       const payload  = text.slice('CARI_SEL:'.length);
@@ -121,36 +123,61 @@ async function handleIncoming({ from, text }) {
       const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
       return await cashflow.handleCardSelection({ from, cardCode, cardName });
     }
+    if (upper === 'ACT_SAVE')   return await confirmActivity(from);
+    if (upper === 'ACT_CANCEL') return await sendText(from, '🚫 Aktivite iptal edildi.');
 
-    // ── 3. Claude ile intent belirle ─────────────────────────
+    // ── 4. Claude ile intent belirle ─────────────────────────
     const intent = await detectIntent(text);
     console.log(`[Router] (${from}/${user.license}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
 
-    // ── 4. Lisans kontrolü ───────────────────────────────────
+    // ── 5. Lisans kontrolü ───────────────────────────────────
     if (!canAccessIntent(user, intent.intent)) {
       return await sendText(from,
-        `⛔ *Yetersiz Lisans*\n\n` +
-        `*${user.license}* lisansınız bu işlem için yeterli değil.\n\n` +
-        `Kullanabileceğiniz özellikler için *yardım* yazın.`
+        `⛔ *Yetersiz Lisans*\n\n*${user.license}* lisansınız bu işlem için yeterli değil.\n\nKullanabileceğiniz özellikler için *yardım* yazın.`
       );
     }
 
-    // ── 5. Modüle yönlendir ───────────────────────────────────
+    // ── 6. Modüle yönlendir ───────────────────────────────────
     switch (intent.intent) {
 
+      case 'login': {
+        if (!user.userCode) {
+          return await sendText(from, '⛔ Müşteri hesapları için oturum açma özelliği bulunmamaktadır.');
+        }
+        setAwaitingPassword(from, { userCode: user.userCode, userName: user.name });
+        return await sendText(from,
+          `🔐 *SAP Girişi*\n\nMerhaba *${user.name}*,\nLütfen SAP B1 şifrenizi yazın.\n\n_⚠️ Mesajınız 2 dakika içinde işlenecektir._`
+        );
+      }
+
+      case 'logout': {
+        const session = getSession(from);
+        if (session) {
+          deleteSession(from);
+          return await sendText(from, `👋 Oturum kapatıldı. Görüşmek üzere, *${session.userName}*!`);
+        }
+        return await sendText(from, 'ℹ️ Zaten aktif bir oturumunuz bulunmuyor.');
+      }
+
+      case 'crm': {
+        const session = getSession(from);
+        if (!session) {
+          return await sendText(from,
+            '🔐 *Aktivite oluşturmak için giriş yapmanız gerekiyor.*\n\n' +
+            'SAP B1 hesabınızla giriş yapmak için *giriş yap* yazın.'
+          );
+        }
+        return await handleCreateActivity({ from, text, session });
+      }
+
       case 'cashflow':
-        return await cashflow.handleQuery({ from, question: text, licenseRestriction: user.cashflowRestriction });
+        return await cashflow.handleQuery({ from, question: text, licenseRestriction: user.cashflowRestriction, customerCardCode: user.customerCardCode });
 
       case 'approval': {
         const docMatch = text.match(/\d+/);
         const docEntry = docMatch ? docMatch[0] : null;
-
-        if (/onayla/i.test(text)) {
-          return await approval.confirmApproval({ from, docEntry, action: 'approve' });
-        }
-        if (/reddet/i.test(text)) {
-          return await approval.confirmApproval({ from, docEntry, action: 'reject' });
-        }
+        if (/onayla/i.test(text)) return await approval.confirmApproval({ from, docEntry, action: 'approve' });
+        if (/reddet/i.test(text)) return await approval.confirmApproval({ from, docEntry, action: 'reject' });
         return await approval.handleApproval({ from, docEntry });
       }
 

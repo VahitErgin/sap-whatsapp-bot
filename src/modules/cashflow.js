@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz } = require('./sapDb');
 const { sendText, sendList }         = require('../services/whatsappService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
@@ -119,11 +119,34 @@ Teknik servis / hizmet çağrısı sorguları:
   }
   → Kullanım: "servis çağrıları", "hizmet durumu", "teknik servis", "seri no ile sorgula", "açık servisler"
 
+Ürün kategorisine göre satış tutarları:
+  endpoint: "SQL_SATIS_KATEGORI"
+  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "5" }
+  → Kullanım: "kategori bazlı satış", "ürün grubu satışları", "en çok satan kategori"
+
+Marka bazlı satış tutarları (SatisTemsilcisi dahil):
+  endpoint: "SQL_SATIS_MARKA"
+  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "5" }
+  → Kullanım: "marka bazlı satış", "markaya göre satış", "en çok satan marka"
+
+Satış temsilcisi bazlı satış tutarları:
+  endpoint: "SQL_SATIS_TEMSILCI"
+  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "10" }
+  → Kullanım: "temsilci bazlı satış", "satış personeli raporu", "en çok satan temsilci", "çalışan bazlı satış"
+
+Stokta olup satışı olmayan ürünler:
+  endpoint: "SQL_STOK_SATISSIZ"
+  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "20" }
+  startDate/endDate opsiyonel — verilmezse tüm zamanlar kontrol edilir
+  → Kullanım: "satılmayan stoklar", "stokta olup satışı olmayan", "hareketsiz stok", "ölü stok"
+
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
 - Parametre yoksa params: {} bırak
 - Tarih belirtilmemişse refDate: "${new Date().toISOString().split('T')[0]}" kullan
 - Sadece JSON döndür, açıklama ekleme
+- $expand KULLANMA — SAP B1 Service Layer desteklemiyor
+- Fatura satır detayı (DocumentLines, ItemCode, Quantity vb.) gereken sorgular için SQL endpoint kullan
 
 KRİTİK — clarification_needed KULLANIM KURALI:
 clarification_needed: true SADECE şu durumda kullan:
@@ -162,7 +185,7 @@ const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
-async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null }) {
+async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null, customerCardCode = null }) {
   if (!question || question.trim() === '') {
     return await sendText(from,
       '📊 *SAP Sorgulama*\n\nNe öğrenmek istersiniz?\n\nÖrnek:\n• _"C001 carisinin bakiyesi"_\n• _"Bu hafta vadesi gelen ödemeler"_\n• _"Stokta azalan ürünler"_'
@@ -178,6 +201,22 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
       ? `[LİSANS KISITLAMASI: ${licenseRestriction}]\n\n${question}`
       : question;
     const plan = await buildQueryPlan(planQuestion);
+
+    // Müşteri kullanıcıysa tüm sorguları kendi CardCode'una kilitle
+    if (customerCardCode && Array.isArray(plan.queries)) {
+      plan.queries.forEach(q => {
+        q.params = q.params || {};
+        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE'].includes(q.endpoint)) {
+          q.params.cardCode = customerCardCode;
+          delete q.params.cardName;
+        } else if (q.method !== 'POST' && q.method !== 'PATCH') {
+          // OData GET sorgularına CardCode filtresi ekle
+          const existing = q.params['$filter'];
+          const cardFilter = `CardCode eq '${customerCardCode}'`;
+          q.params['$filter'] = existing ? `(${existing}) and ${cardFilter}` : cardFilter;
+        }
+      });
+    }
 
     // 2. Ek bilgi gerekiyor mu?
     // Planner clarification istedi ama soru içinde isim/harf dizisi varsa
@@ -339,8 +378,8 @@ async function buildQueryPlan(question, retries = 2) {
         ?.map(b => b.text)
         ?.join('') || '{}';
 
-      const cleaned = raw.replace(/```json|```/g, '').trim();
-      return JSON.parse(cleaned);
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      return JSON.parse(jsonMatch ? jsonMatch[0] : '{}');
     } catch (err) {
       const status = err.response?.status;
       if (status === 429 && attempt < retries) {
@@ -418,6 +457,38 @@ async function executeQueries(sl, queries, dbName) {
         const rows = await getVadesiGecenler({
           refDate:  q.params.refDate,
           cardType: q.params.cardType || 'C',
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_SATIS_KATEGORI') {
+        const rows = await getSatisByKategori({
+          startDate: q.params.startDate,
+          endDate:   q.params.endDate,
+          top:       parseInt(q.params.top) || 5,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_SATIS_MARKA') {
+        const rows = await getSatisByMarka({
+          startDate: q.params.startDate,
+          endDate:   q.params.endDate,
+          top:       parseInt(q.params.top) || 5,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_SATIS_TEMSILCI') {
+        const rows = await getSatisByTemsilci({
+          startDate: q.params.startDate,
+          endDate:   q.params.endDate,
+          top:       parseInt(q.params.top) || 10,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_STOK_SATISSIZ') {
+        const rows = await getStokSatissiz({
+          startDate: q.params.startDate || null,
+          endDate:   q.params.endDate   || null,
+          top:       parseInt(q.params.top) || 20,
           dbName,
         });
         data = rows;
