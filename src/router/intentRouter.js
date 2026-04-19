@@ -168,33 +168,34 @@ async function detectIntentLocal(text) {
 }
 
 // Yüksek güvenli keyword eşleşmeleri — yanlış pozitif riski sıfır
+// NOT: Türkçe ş,ğ,ı,ö,ü,ç karakterleri JS \b ile çalışmaz → includes/indexOf kullan
 function _keywordIntent(text) {
   const t = text.toLowerCase().trim();
 
-  if (/\bgiriş\b/.test(t) || /\blogin\b/.test(t) || /oturum\s*aç/.test(t))
+  if (t.includes('giriş') || t.includes('login') || t.includes('oturum aç'))
     return { intent: 'login', confidence: 0.97, reason: 'keyword' };
 
-  if (/\bçıkış\b/.test(t) || /\blogout\b/.test(t) || /oturumu?\s*kapat/.test(t))
+  if (t.includes('çıkış') || t.includes('logout') || t.includes('oturumu kapat') || t.includes('oturum kapat'))
     return { intent: 'logout', confidence: 0.97, reason: 'keyword' };
 
-  if (/^(yardım\??|menü|ne yapabilirsin\??)$/.test(t))
+  if (t === 'yardım' || t === 'menü' || t === 'yardım?' || t === 'ne yapabilirsin' || t === 'ne yapabilirsin?')
     return { intent: 'help', confidence: 0.97, reason: 'keyword' };
 
-  if (/\bonayla\b/.test(t) || /\breddet\b/.test(t) || /bekleyen\s+onay/.test(t))
+  if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay'))
     return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
 
-  // CRM: sadece açık oluşturma fiilleri veya 1. şahıs geçmiş zaman (yaptım, aradım)
+  // CRM: açık oluşturma fiilleri veya 1. şahıs geçmiş zaman
   if (
     /aktivite\s+(oluştur|ekle|yaz|kaydet)/.test(t) ||
     /toplantı\s+(yaptık|ekle|oluştur|kaydı)/.test(t) ||
-    /telefon\s+görüşmesi\s+(ekle|yaptım|kaydı|oluştur)/.test(t) ||
-    /\b(not|görev)\s+ekle\b/.test(t) ||
-    /\b(aradım|ziyaret\s+ettim|görüştük|konuştuk|toplantı\s+yaptık)\b/.test(t)
+    /telefon görüşmesi (ekle|yaptım|kaydı|oluştur)/.test(t) ||
+    /(not|görev) ekle/.test(t) ||
+    /(aradım|ziyaret ettim|görüştük|konuştuk|toplantı yaptık)/.test(t)
   )
     return { intent: 'crm', confidence: 0.90, reason: 'keyword' };
 
-  // SAP hata kodları çok belirgin
-  if (/-\d+\s*(hatası|kodu)/.test(t) || /dönem\s+kapalı/.test(t))
+  // SAP hata kodları
+  if (/-\d+ (hatası|kodu)/.test(t) || t.includes('dönem kapalı'))
     return { intent: 'support', confidence: 0.92, reason: 'keyword' };
 
   return null; // belirsiz → Claude'a git
