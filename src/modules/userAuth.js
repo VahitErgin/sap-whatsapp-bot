@@ -111,7 +111,10 @@ async function resolveUser(phone, dbName) {
 // ─────────────────────────────────────────────────────────────
 // Kullanıcının verilen intent'e erişim izni var mı?
 // ─────────────────────────────────────────────────────────────
+const ALWAYS_ALLOWED = new Set(['login', 'logout', 'help']);
+
 function canAccessIntent(user, intent) {
+  if (ALWAYS_ALLOWED.has(intent)) return true;
   if (!user.allowedIntents) return true;
   return user.allowedIntents.includes(intent);
 }
