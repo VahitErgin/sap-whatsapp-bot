@@ -22,7 +22,11 @@ const { sendText } = require('../services/whatsappService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
-const { handleCreateActivity, handleWizardInput, handleWizardTypeSelection, getWizardState, confirmActivity } = require('../modules/crmActivity');
+const {
+  handleCreateActivity, handleWizardInput,
+  handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
+  getWizardState, confirmActivity,
+} = require('../modules/crmActivity');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
@@ -93,6 +97,12 @@ async function handleIncoming({ from, text }) {
     }
     if (text.startsWith('ACT_TYPE:')) {
       return await handleWizardTypeSelection(from, text.replace('ACT_TYPE:', '').trim());
+    }
+    if (text.startsWith('ACT_CAT:')) {
+      return await handleWizardCategorySelection(from, text.replace('ACT_CAT:', '').trim());
+    }
+    if (text.startsWith('ACT_SUB:')) {
+      return await handleWizardSubjectSelection(from, text.replace('ACT_SUB:', '').trim());
     }
 
     // ── 4. Wizard modu (firma adı veya not bekleniyor) ───────

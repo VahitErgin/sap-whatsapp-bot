@@ -3,12 +3,12 @@
 // ─────────────────────────────────────────────────────────────
 // crmActivity.js  —  Adım adım wizard akışı
 //
-// 1. CRM intent → firma adı sor  (veya prefill'den atla)
-// 2. Firma alındı → aktivite tipi LIST'i göster
-// 3. Kullanıcı tipten tap eder  (ACT_TYPE:xxx)
-// 4. Not sor
-// 5. Not alındı → özet + Kaydet/İptal butonu
-// 6. Kaydet → SAP Activities POST
+// 1. firma adı
+// 2. aktivite tipi  (Toplantı/Telefon/...)   ACT_TYPE:xxx
+// 3. tür            (OCLG)                   ACT_CAT:xxx
+// 4. konu           (OCLS)                   ACT_SUB:xxx
+// 5. not metni
+// 6. özet → Kaydet / İptal
 //
 // Claude API kullanılmaz.
 // ─────────────────────────────────────────────────────────────
@@ -19,15 +19,14 @@ const { resolveCardCode } = require('./sapDb');
 const { sendText, sendButtons, sendList } = require('../services/whatsappService');
 
 // ── Wizard durumu ─────────────────────────────────────────────
-// phone10 → { step:'firm'|'note', session, dbName, cardName, cardCode, action, expiresAt }
-const _wizard      = new Map();
-const WIZARD_TTL   = 10 * 60 * 1000;
+const _wizard    = new Map();
+const WIZARD_TTL = 10 * 60 * 1000;
 
 // ── Onay bekleme ──────────────────────────────────────────────
 const _pendingActivity = new Map();
 const PENDING_TTL      = 5 * 60 * 1000;
 
-// Tüm aktivite tipleri
+// Aktivite tipi listesi (Activity enum)
 const ALL_TYPES = [
   { id: 'ACT_TYPE:Meeting',    label: 'Toplantı',  desc: 'Yüz yüze / online görüşme' },
   { id: 'ACT_TYPE:Phone Call', label: 'Telefon',   desc: 'Telefon görüşmesi'         },
@@ -37,7 +36,7 @@ const ALL_TYPES = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-// Admin panel: OCLG / OCLS listesi (yönetim için)
+// Admin panel: OCLG / OCLS listeleri
 // ─────────────────────────────────────────────────────────────
 async function getActivityTypes(dbName) {
   const sl   = getConnection(dbName || config.sap.companyDb);
@@ -51,8 +50,7 @@ async function getActivitySubjects(dbName) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// getWizardState — intentRouter'da mesajın wizard'a ait olup
-//                  olmadığını kontrol eder
+// getWizardState — intentRouter'da kontrol için
 // ─────────────────────────────────────────────────────────────
 function getWizardState(phone) {
   const k = _norm(phone);
@@ -63,23 +61,37 @@ function getWizardState(phone) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// handleCreateActivity — CRM intent'in giriş noktası
-// Prefill: ilk mesajdan firma/tip çıkarılabiliyorsa adım atla
+// handleCreateActivity — CRM intent giriş noktası
 // ─────────────────────────────────────────────────────────────
 async function handleCreateActivity({ from, text, session, dbName }) {
+  // SAP'tan tür ve konu listelerini önceden çek
+  const [actTypes, actSubjects] = await Promise.all([
+    getActivityTypes(dbName).catch(() => []),
+    getActivitySubjects(dbName).catch(() => []),
+  ]);
+
   const prefill = _prefillFromText(text);
+  const state   = {
+    step:        'firm',
+    session,
+    dbName,
+    cardName:    '',
+    cardCode:    null,
+    action:      null,
+    activityType: null,
+    subjectCode:  null,
+    notes:        '',
+    actTypes,    // OCLG kayıtları
+    actSubjects, // OCLS kayıtları
+    expiresAt:   Date.now() + WIZARD_TTL,
+  };
 
   if (prefill.cardName) {
-    // Firma tespit edildi → tip seçimine geç
-    const state = _newState(session, dbName);
     state.cardName = prefill.cardName;
     state.step     = 'type';
     _wizard.set(_norm(from), state);
     await _sendTypeList(from, prefill.cardName);
   } else {
-    // Firma bilinmiyor → önce sor
-    const state = _newState(session, dbName);
-    state.step   = 'firm';
     _wizard.set(_norm(from), state);
     await sendText(from,
       `📝 *Aktivite Oluştur*\n\n` +
@@ -90,18 +102,16 @@ async function handleCreateActivity({ from, text, session, dbName }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// handleWizardInput — wizard içindeki metin mesajları
+// handleWizardInput — wizard içindeki metin mesajları (firm, note)
 // ─────────────────────────────────────────────────────────────
 async function handleWizardInput(from, text) {
   const state = getWizardState(from);
   if (!state) return;
-
   _refreshTTL(from, state);
 
   if (state.step === 'firm') {
     if (text.trim() !== '*') {
       state.cardName = text.trim();
-      // CardCode çözümlemeyi dene (başarısız olsa da devam et)
       try {
         const resolved = await resolveCardCode({ cardName: state.cardName, dbName: state.dbName });
         if (resolved.found === 'one') {
@@ -109,8 +119,6 @@ async function handleWizardInput(from, text) {
           state.cardName = resolved.record.CardName;
         }
       } catch { /* yoksay */ }
-    } else {
-      state.cardName = '';
     }
     state.step = 'type';
     _wizard.set(_norm(from), state);
@@ -124,19 +132,61 @@ async function handleWizardInput(from, text) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// handleWizardTypeSelection — ACT_TYPE:xxx list seçimi
+// handleWizardTypeSelection — ACT_TYPE:xxx
 // ─────────────────────────────────────────────────────────────
 async function handleWizardTypeSelection(from, actionId) {
   const state = getWizardState(from);
   if (!state) return;
 
   state.action = actionId;
-  state.step   = 'note';
+  _refreshTTL(from, state);
+
+  if (state.actTypes.length > 0) {
+    state.step = 'category';
+    _wizard.set(_norm(from), state);
+    await _sendCategoryList(from, state.actTypes);
+  } else {
+    // Tür yok → konu adımına geç
+    await _nextAfterCategory(from, state);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// handleWizardCategorySelection — ACT_CAT:xxx  (OCLG)
+// ─────────────────────────────────────────────────────────────
+async function handleWizardCategorySelection(from, code) {
+  const state = getWizardState(from);
+  if (!state) return;
+
+  if (code !== 'skip') state.activityType = code;
+  _refreshTTL(from, state);
+  await _nextAfterCategory(from, state);
+}
+
+async function _nextAfterCategory(from, state) {
+  if (state.actSubjects.length > 0) {
+    state.step = 'subject';
+    _wizard.set(_norm(from), state);
+    await _sendSubjectList(from, state.actSubjects);
+  } else {
+    state.step = 'note';
+    _wizard.set(_norm(from), state);
+    await sendText(from, `📝 Aktivite notunu yazın:`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// handleWizardSubjectSelection — ACT_SUB:xxx  (OCLS)
+// ─────────────────────────────────────────────────────────────
+async function handleWizardSubjectSelection(from, code) {
+  const state = getWizardState(from);
+  if (!state) return;
+
+  if (code !== 'skip') state.subjectCode = code;
+  state.step = 'note';
   _refreshTTL(from, state);
   _wizard.set(_norm(from), state);
-
-  const label = ALL_TYPES.find(t => t.id === `ACT_TYPE:${actionId}`)?.label || actionId;
-  await sendText(from, `📋 *${label}* seçildi.\n\n📝 Aktivite notunu yazın:`);
+  await sendText(from, `📝 Aktivite notunu yazın:`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -160,9 +210,10 @@ async function confirmActivity(from) {
       Notes:        activityData.notes,
     };
 
-    if (activityData.cardCode)    payload.CardCode        = activityData.cardCode;
-    if (activityData.subjectCode) payload.ActivitySubject = Number(activityData.subjectCode);
-    if (activityData.employeeId)  payload.HandledBy       = activityData.employeeId;
+    if (activityData.cardCode)     payload.CardCode         = activityData.cardCode;
+    if (activityData.activityType) payload.ActivityType     = Number(activityData.activityType);
+    if (activityData.subjectCode)  payload.ActivitySubject  = Number(activityData.subjectCode);
+    if (activityData.employeeId)   payload.HandledBy        = activityData.employeeId;
 
     await sl.post('Activities', payload);
 
@@ -184,15 +235,6 @@ async function confirmActivity(from) {
 // Yardımcılar
 // ─────────────────────────────────────────────────────────────
 
-function _newState(session, dbName) {
-  return { session, dbName, cardName: '', cardCode: null, action: null, notes: '', expiresAt: Date.now() + WIZARD_TTL };
-}
-
-function _refreshTTL(from, state) {
-  state.expiresAt = Date.now() + WIZARD_TTL;
-  _wizard.set(_norm(from), state);
-}
-
 async function _sendTypeList(from, cardName) {
   const activeTypes = _getAdminTypes();
   const rows = (activeTypes.length
@@ -204,15 +246,46 @@ async function _sendTypeList(from, cardName) {
   await sendList(from, '📋 Aktivite Tipi', header, 'Tip Seç', [{ title: 'Tipler', rows }]);
 }
 
+async function _sendCategoryList(from, actTypes) {
+  const rows = [
+    { id: 'ACT_CAT:skip', title: '— Atla —', description: 'Tür seçmeden devam et' },
+    ...actTypes.slice(0, 9).map(t => ({
+      id:          `ACT_CAT:${t.Code}`,
+      title:       t.Name,
+      description: t.Code,
+    })),
+  ];
+  await sendList(from, '🗂 Tür Seçin', 'Aktivite türünü seçin:', 'Tür Seç', [{ title: 'Türler', rows }]);
+}
+
+async function _sendSubjectList(from, subjects) {
+  const rows = [
+    { id: 'ACT_SUB:skip', title: '— Atla —', description: 'Konu seçmeden devam et' },
+    ...subjects.slice(0, 9).map(s => ({
+      id:          `ACT_SUB:${s.Code}`,
+      title:       s.Name,
+      description: String(s.Code),
+    })),
+  ];
+  await sendList(from, '📌 Konu Seçin', 'Aktivite konusunu seçin:', 'Konu Seç', [{ title: 'Konular', rows }]);
+}
+
 async function _showSummary(from, state) {
   const today = new Date().toISOString().split('T')[0];
+  const catName = state.activityType
+    ? (state.actTypes.find(t => String(t.Code) === String(state.activityType))?.Name || state.activityType)
+    : null;
+  const subName = state.subjectCode
+    ? (state.actSubjects.find(s => String(s.Code) === String(state.subjectCode))?.Name || state.subjectCode)
+    : null;
+
   const activityData = {
     cardCode:     state.cardCode,
     cardName:     state.cardName,
     action:       state.action || 'Meeting',
-    subjectCode:  null,
+    activityType: state.activityType,
+    subjectCode:  state.subjectCode,
     notes:        state.notes,
-    details:      '',
     activityDate: today,
     employeeId:   state.session.employeeId,
     userName:     state.session.userName,
@@ -222,6 +295,8 @@ async function _showSummary(from, state) {
     `👤 *Kullanıcı:* ${state.session.userName}`,
     state.cardName ? `🏢 *Muhatap:* ${state.cardName}` : '',
     `📋 *Tip:* ${activityData.action}`,
+    catName  ? `🗂 *Tür:* ${catName}`   : '',
+    subName  ? `📌 *Konu:* ${subName}`  : '',
     `📅 *Tarih:* ${today}`,
     `📝 *Not:* ${activityData.notes}`,
   ].filter(Boolean).join('\n');
@@ -234,22 +309,12 @@ async function _showSummary(from, state) {
   ]);
 }
 
-// İlk mesajdan firma/tip tahmin et
 function _prefillFromText(text) {
-  const t = text.toLowerCase();
-  let action = null;
-  if (/(toplantı|görüşme|ziyaret|buluştuk)/.test(t)) action = 'Meeting';
-  else if (/(aradım|arama|telefon)/.test(t))          action = 'Phone Call';
-  else if (/(görev|yapılacak)/.test(t))               action = 'Task';
-  else if (/(mail|e-posta|eposta)/.test(t))           action = 'Email';
-
   let cardName = '';
   const m = text.match(/^(.+?)\s+ile\b/i);
   if (m) cardName = m[1].trim();
-
-  return { cardName, action };
+  return { cardName };
 }
-
 
 function _actionEnum(action) {
   const map = {
@@ -269,6 +334,11 @@ function _getAdminTypes() {
   } catch { return []; }
 }
 
+function _refreshTTL(from, state) {
+  state.expiresAt = Date.now() + WIZARD_TTL;
+  _wizard.set(_norm(from), state);
+}
+
 function _norm(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
@@ -277,6 +347,8 @@ module.exports = {
   handleCreateActivity,
   handleWizardInput,
   handleWizardTypeSelection,
+  handleWizardCategorySelection,
+  handleWizardSubjectSelection,
   getWizardState,
   confirmActivity,
   getActivityTypes,
