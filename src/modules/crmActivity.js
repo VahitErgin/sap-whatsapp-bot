@@ -155,8 +155,7 @@ async function confirmActivity(from) {
   try {
     const sl      = getConnection(dbName || config.sap.companyDb);
     const payload = {
-      Activity:     'cn_Task',
-      Action:       _actionEnum(activityData.action),
+      Activity:     _actionEnum(activityData.action),
       ActivityDate: activityData.activityDate,
       Notes:        activityData.notes,
     };
