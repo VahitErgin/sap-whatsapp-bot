@@ -16,6 +16,8 @@
  *   REJECT:<BELGE_NO>  → approval
  */
 
+const axios  = require('axios');
+const config = require('../config/config');
 const { sendText } = require('../services/whatsappService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
@@ -87,8 +89,8 @@ async function handleIncoming({ from, text }) {
     if (upper === 'ACT_SAVE')   return await confirmActivity(from);
     if (upper === 'ACT_CANCEL') return await sendText(from, '🚫 Aktivite iptal edildi.');
 
-    // ── 4. Keyword ile intent belirle ────────────────────────
-    const intent = detectIntentLocal(text);
+    // ── 4. Intent belirle (keyword → Claude Haiku fallback) ──
+    const intent = await detectIntentLocal(text);
     console.log(`[Router] (${from}/${user.license}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
 
     // ── 5. Lisans kontrolü ───────────────────────────────────
@@ -157,9 +159,16 @@ async function handleIncoming({ from, text }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Keyword tabanlı intent tespiti (Claude API kullanılmaz)
+// Intent tespiti: kesin keyword → direkt, belirsiz → Claude Haiku
 // ─────────────────────────────────────────────────────────────
-function detectIntentLocal(text) {
+async function detectIntentLocal(text) {
+  const fast = _keywordIntent(text);
+  if (fast) return fast;
+  return await _claudeIntent(text);
+}
+
+// Yüksek güvenli keyword eşleşmeleri — yanlış pozitif riski sıfır
+function _keywordIntent(text) {
   const t = text.toLowerCase().trim();
 
   if (/\bgiriş\b/.test(t) || /\blogin\b/.test(t) || /oturum\s*aç/.test(t))
@@ -168,35 +177,71 @@ function detectIntentLocal(text) {
   if (/\bçıkış\b/.test(t) || /\blogout\b/.test(t) || /oturumu?\s*kapat/.test(t))
     return { intent: 'logout', confidence: 0.97, reason: 'keyword' };
 
-  if (/^(yardım|yardım\?|menü|ne yapabilirsin(\?)?)$/.test(t))
+  if (/^(yardım\??|menü|ne yapabilirsin\??)$/.test(t))
     return { intent: 'help', confidence: 0.97, reason: 'keyword' };
 
-  if (/\bonayla\b/.test(t) || /\breddet\b/.test(t) || /bekleyen\s+onay/.test(t) || /satın\s*alma\s+onay/.test(t))
-    return { intent: 'approval', confidence: 0.92, reason: 'keyword' };
+  if (/\bonayla\b/.test(t) || /\breddet\b/.test(t) || /bekleyen\s+onay/.test(t))
+    return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
 
-  // CRM: aktivite OLUŞTURMA (listeleme → cashflow'a düşer)
+  // CRM: sadece açık oluşturma fiilleri veya 1. şahıs geçmiş zaman (yaptım, aradım)
   if (
     /aktivite\s+(oluştur|ekle|yaz|kaydet)/.test(t) ||
-    /toplantı\s+(yaptık|notu|ekle|oluştur|kaydı)/.test(t) ||
+    /toplantı\s+(yaptık|ekle|oluştur|kaydı)/.test(t) ||
     /telefon\s+görüşmesi\s+(ekle|yaptım|kaydı|oluştur)/.test(t) ||
-    /görüşme\s+(ekle|yaptık|notu)/.test(t) ||
     /\b(not|görev)\s+ekle\b/.test(t) ||
     /\b(aradım|ziyaret\s+ettim|görüştük|konuştuk|toplantı\s+yaptık)\b/.test(t)
   )
-    return { intent: 'crm', confidence: 0.88, reason: 'keyword' };
+    return { intent: 'crm', confidence: 0.90, reason: 'keyword' };
 
-  // SAP destek / hata soruları
-  if (
-    /-\d+\s*(hatası|kodu|err)/.test(t) ||
-    /hata\s+(aldım|oluştu|veriyor)/.test(t) ||
-    /nasıl\s+(yapılır|iptal|açılır|kapatılır|silinir)/.test(t) ||
-    /menü\s+yolu/.test(t) ||
-    /dönem\s+kapalı/.test(t)
-  )
-    return { intent: 'support', confidence: 0.88, reason: 'keyword' };
+  // SAP hata kodları çok belirgin
+  if (/-\d+\s*(hatası|kodu)/.test(t) || /dönem\s+kapalı/.test(t))
+    return { intent: 'support', confidence: 0.92, reason: 'keyword' };
 
-  // Default: cashflow (SAP veri sorgusu)
-  return { intent: 'cashflow', confidence: 0.75, reason: 'default' };
+  return null; // belirsiz → Claude'a git
+}
+
+// Claude Haiku — belirsiz mesajlar için
+const INTENT_SYSTEM = `Sen SAP Business One WhatsApp asistanının yönlendirici katmanısın.
+Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini JSON olarak döndür.
+
+MODÜLLER:
+- "cashflow"  → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
+- "approval"  → Satın alma siparişi ONAYLAMA veya REDDETME
+- "crm"       → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
+- "support"   → SAP hata mesajları, nasıl yapılır soruları, teknik destek
+- "help"      → Yardım menüsü
+
+KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm
+
+YANIT (sadece JSON):
+{"intent":"cashflow","confidence":0.9,"reason":"kısa açıklama"}`;
+
+async function _claudeIntent(text) {
+  try {
+    const res = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 80,
+        system:     INTENT_SYSTEM,
+        messages:   [{ role: 'user', content: text }],
+      },
+      {
+        headers: {
+          'x-api-key':         config.anthropic.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type':      'application/json',
+        },
+        timeout: 10000,
+      }
+    );
+    const raw     = res.data?.content?.filter(b => b.type === 'text')?.map(b => b.text)?.join('') || '{}';
+    const matched = raw.match(/\{[\s\S]*?\}/);
+    return JSON.parse(matched ? matched[0] : '{}');
+  } catch (err) {
+    console.warn('[Router] Claude intent hatası, cashflow\'a düşüyor:', err.message);
+    return { intent: 'cashflow', confidence: 0.5, reason: 'fallback' };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
