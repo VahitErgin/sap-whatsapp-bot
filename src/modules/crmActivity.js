@@ -3,24 +3,29 @@
 // ─────────────────────────────────────────────────────────────
 // crmActivity.js
 //
-// WhatsApp'tan CRM aktivitesi oluşturma.
-// Kullanıcı doğal dille yazar → Claude parse eder → SAP'a kaydeder.
-// HandledBy = login olan SAP kullanıcısının employee ID'si
+// WhatsApp'tan CRM aktivitesi oluşturma — şablon tabanlı akış.
+//
+// 1. CRM intent → bot şablon gönderir (ön-doldurulmuş)
+// 2. Kullanıcı düzenleyip gönderir
+// 3. Bot parse eder → özet gösterir → Kaydet / İptal
+// 4. Kaydet → SAP Activities POST
+//
+// Claude API kullanılmaz.
 // ─────────────────────────────────────────────────────────────
 
-const axios  = require('axios');
 const config = require('../config/config');
 const { getConnection } = require('./sapClient');
 const { resolveCardCode } = require('./sapDb');
 const { sendText, sendButtons } = require('../services/whatsappService');
 
-// Onay bekleme: phone10 → { activityData, expiresAt }
-const _pendingActivity = new Map();
-const PENDING_TTL = 5 * 60 * 1000;
+const _pendingActivity  = new Map();
+const PENDING_TTL       = 5  * 60 * 1000;
+
+const _awaitingTemplate = new Map();
+const TEMPLATE_TTL      = 10 * 60 * 1000;
 
 // ─────────────────────────────────────────────────────────────
-// SAP'tan aktif aktivite tiplerini getir (OCLG)
-// Admin panelden filtrelenmiş liste veya tümü
+// SAP'tan aktif aktivite/konu listelerini getir (admin panel için)
 // ─────────────────────────────────────────────────────────────
 async function getActivityTypes(dbName) {
   const sl   = getConnection(dbName || config.sap.companyDb);
@@ -28,7 +33,6 @@ async function getActivityTypes(dbName) {
   return data?.value || [];
 }
 
-// OCLS - Konular
 async function getActivitySubjects(dbName) {
   const sl   = getConnection(dbName || config.sap.companyDb);
   const data = await sl.get('ActivitySubjects', { '$orderby': 'Name' });
@@ -36,152 +40,115 @@ async function getActivitySubjects(dbName) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Claude ile doğal dil → aktivite alanları
+// getAwaitingTemplate — intentRouter'da kontrol için
 // ─────────────────────────────────────────────────────────────
-async function parseActivityFromText(text, activeTypes, activeSubjects) {
-  const today = new Date().toISOString().split('T')[0];
-
-  const systemPrompt = `Sen SAP B1 CRM aktivite asistanısın.
-Kullanıcının mesajından aktivite bilgilerini JSON olarak çıkar.
-
-AKTİVİTE TİPLERİ (Action enum değerleri):
-- "Phone Call" → telefon görüşmesi, arama
-- "Meeting" → toplantı, görüşme, ziyaret
-- "Task" → görev, yapılacak iş
-- "Note" → not, hatırlatma
-- "Email" → e-posta
-
-KONU SEÇENEKLERİ (admin tanımlı):
-${activeSubjects.length ? activeSubjects.map(s => `- ${s.Code}: ${s.Name}`).join('\n') : '- Genel'}
-
-YANIT FORMATI (sadece JSON):
-{
-  "cardName": "firma veya kişi adı (varsa)",
-  "action": "Phone Call | Meeting | Task | Note | Email",
-  "subjectCode": "konu kodu (yoksa null)",
-  "notes": "aktivite açıklaması / konuşulan konular",
-  "activityDate": "YYYY-MM-DD (belirtilmemişse bugün: ${today})",
-  "details": "toplantı notu veya ek detay (varsa)"
-}
-
-Eksik bilgi için makul varsayım yap, sormadan devam et.`;
-
-  try {
-    const response = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model:      'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        system:     systemPrompt,
-        messages:   [{ role: 'user', content: text }],
-      },
-      {
-        headers: {
-          'x-api-key':         config.anthropic.apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type':      'application/json',
-        },
-        timeout: 15000,
-      }
-    );
-
-    const raw      = response.data?.content?.filter(b => b.type === 'text')?.map(b => b.text)?.join('') || '{}';
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    return JSON.parse(jsonMatch ? jsonMatch[0] : '{}');
-  } catch (err) {
-    console.warn('[CRM] Claude parse başarısız, regex fallback:', err.message);
-    return _regexParseActivity(text, today);
-  }
-}
-
-// Regex tabanlı yedek parser — Claude erişilemez olduğunda devreye girer
-function _regexParseActivity(text, today) {
-  const t = text.toLowerCase();
-
-  // Aktivite tipi
-  let action = 'Phone Call';
-  if (/(toplantı|görüşme|ziyaret|buluştuk)/.test(t))       action = 'Meeting';
-  else if (/(görev|yapılacak|hatırlatma|remind)/.test(t))   action = 'Task';
-  else if (/(not|kaydet|yazdım)/.test(t))                   action = 'Note';
-  else if (/(mail|e-posta|eposta)/.test(t))                 action = 'Email';
-
-  // Firma adı: "X ile", "X firması", "X şirketi" kalıpları
-  let cardName = '';
-  const companyMatch = text.match(/^([A-ZÇĞİÖŞÜa-zçğışöşü0-9\s]+?)\s+(ile|firması|şirketi|a\.ş\.|ltd)\b/i)
-    || text.match(/\b([A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğışöşü]{2,}(?:\s+[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğışöşü]{1,})*)\s+ile\b/i);
-  if (companyMatch) cardName = companyMatch[1].trim();
-
-  return {
-    cardName:     cardName || null,
-    action,
-    subjectCode:  null,
-    notes:        text.trim(),
-    activityDate: today,
-    details:      '',
-  };
+function getAwaitingTemplate(phone) {
+  const k = _norm(phone);
+  const e = _awaitingTemplate.get(k);
+  if (!e) return null;
+  if (e.expiresAt < Date.now()) { _awaitingTemplate.delete(k); return null; }
+  return e;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Ana işleyici: mesaj → parse → özet → onay bekle
+// Ana işleyici: CRM intent tetiklenince şablon gönder
+// İlk mesajdan firma/tip/tarih bilgisi varsa ön-doldur
 // ─────────────────────────────────────────────────────────────
 async function handleCreateActivity({ from, text, session, dbName }) {
-  await sendText(from, '⏳ Aktivite oluşturuluyor...');
+  const prefill = _prefillFromText(text);
 
-  try {
-    // Admin'den aktif tip/konu listesi
-    const activeSubjects = _getAdminSubjects();
-    const activeTypes    = _getAdminTypes();
+  _awaitingTemplate.set(_norm(from), {
+    session,
+    dbName,
+    expiresAt: Date.now() + TEMPLATE_TTL,
+  });
 
-    // Claude ile parse et
-    const parsed = await parseActivityFromText(text, activeTypes, activeSubjects);
+  const subjects     = _getAdminSubjects();
+  const subjectHint  = subjects.length
+    ? `Konu: ${subjects.map(s => s.Name).join(' / ')}\n`
+    : '';
+  const typeHint     = _getAdminTypes().join(' / ') || 'Toplantı / Telefon / Görev / Not / Email';
 
-    // cardName varsa CardCode'a çevir
-    let cardCode = null;
-    let cardName = parsed.cardName || '';
-    if (cardName) {
-      const resolved = await resolveCardCode({ cardName, dbName });
-      if (resolved.found === 'one') {
-        cardCode = resolved.record.CardCode;
-        cardName = resolved.record.CardName;
-      } else if (resolved.found === 'many') {
-        cardCode = null; // onay aşamasında uyar
-      }
-    }
+  const tpl = [
+    `📝 *Aktivite Oluştur*`,
+    ``,
+    `Aşağıdaki şablonu düzenleyip gönderin:`,
+    ``,
+    `Firma: ${prefill.cardName}`,
+    `Tip: ${prefill.action}`,
+    `Tarih: ${prefill.date}`,
+    subjectHint ? `Konu: ` : '',
+    `Not: ${prefill.notes}`,
+    ``,
+    `_Tip seçenekleri: ${typeHint}_`,
+    subjects.length ? `_Konu seçenekleri: ${subjects.map(s => s.Name).join(', ')}_` : '',
+    `_Tarih: bugün, dün, YYYY-MM-DD veya GG.MM.YYYY_`,
+  ].filter(l => l !== null && l !== undefined).join('\n');
 
-    const activityData = {
-      cardCode,
-      cardName,
-      action:       parsed.action       || 'Phone Call',
-      subjectCode:  parsed.subjectCode  || null,
-      notes:        parsed.notes        || text,
-      details:      parsed.details      || '',
-      activityDate: parsed.activityDate || new Date().toISOString().split('T')[0],
-      employeeId:   session.employeeId,
-      userName:     session.userName,
-    };
+  await sendText(from, tpl);
+}
 
-    // Özet göster → Kaydet / İptal butonu
-    const summary = [
-      `👤 *Kullanıcı:* ${session.userName}`,
-      cardName ? `🏢 *Muhatap:* ${cardName}` : '',
-      `📋 *Tip:* ${activityData.action}`,
-      activityData.subjectCode ? `📌 *Konu:* ${activityData.subjectCode}` : '',
-      `📅 *Tarih:* ${activityData.activityDate}`,
-      `📝 *Not:* ${activityData.notes}`,
-      activityData.details ? `📄 *Detay:* ${activityData.details}` : '',
-    ].filter(Boolean).join('\n');
+// ─────────────────────────────────────────────────────────────
+// Şablon doldurulmuş mesajı işle
+// ─────────────────────────────────────────────────────────────
+async function handleTemplateInput(from, text) {
+  const entry = _awaitingTemplate.get(_norm(from));
+  _awaitingTemplate.delete(_norm(from));
 
-    _pendingActivity.set(_norm(from), { activityData, dbName, expiresAt: Date.now() + PENDING_TTL });
+  if (!entry) return;
+  const { session, dbName } = entry;
 
-    await sendButtons(from, '✅ Aktivite Özeti', summary, [
-      { id: 'ACT_SAVE',   title: '💾 Kaydet' },
-      { id: 'ACT_CANCEL', title: '🚫 İptal'  },
-    ]);
+  const fields = _parseTemplate(text);
 
-  } catch (err) {
-    console.error('[CRM] Parse hatası:', err.message);
-    await sendText(from, '⚠️ Aktivite bilgileri işlenemedi. Lütfen tekrar deneyin.');
+  if (!fields.not && !fields.firma) {
+    return await sendText(from, '⚠️ Şablon anlaşılamadı. Lütfen "Not:" satırını doldurun ve tekrar gönderin.');
   }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // CardCode çözümle
+  let cardCode = null;
+  let cardName = fields.firma || '';
+  if (cardName) {
+    const resolved = await resolveCardCode({ cardName, dbName });
+    if (resolved.found === 'one') {
+      cardCode = resolved.record.CardCode;
+      cardName = resolved.record.CardName;
+    }
+    // found='many' → cardCode null kalır, özet gösterilir, kullanıcı görecek
+  }
+
+  const activityDate = _parseDate(fields.tarih) || today;
+  const action       = _mapAction(fields.tip) || 'Meeting';
+  const subjectCode  = _findSubjectCode(fields.konu);
+
+  const activityData = {
+    cardCode,
+    cardName,
+    action,
+    subjectCode,
+    notes:        fields.not || text.trim(),
+    details:      '',
+    activityDate,
+    employeeId:   session.employeeId,
+    userName:     session.userName,
+  };
+
+  const summary = [
+    `👤 *Kullanıcı:* ${session.userName}`,
+    cardName ? `🏢 *Muhatap:* ${cardName}` : '',
+    `📋 *Tip:* ${action}`,
+    subjectCode ? `📌 *Konu:* ${fields.konu}` : '',
+    `📅 *Tarih:* ${activityDate}`,
+    `📝 *Not:* ${activityData.notes}`,
+  ].filter(Boolean).join('\n');
+
+  _pendingActivity.set(_norm(from), { activityData, dbName, expiresAt: Date.now() + PENDING_TTL });
+
+  await sendButtons(from, '✅ Aktivite Özeti', summary, [
+    { id: 'ACT_SAVE',   title: '💾 Kaydet' },
+    { id: 'ACT_CANCEL', title: '🚫 İptal'  },
+  ]);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -204,12 +171,11 @@ async function confirmActivity(from) {
       Action:       _actionEnum(activityData.action),
       ActivityDate: activityData.activityDate,
       Notes:        activityData.notes,
-      Details:      activityData.details || undefined,
     };
 
-    if (activityData.cardCode)   payload.CardCode         = activityData.cardCode;
-    if (activityData.subjectCode) payload.ActivitySubject  = Number(activityData.subjectCode);
-    if (activityData.employeeId) payload.HandledBy         = activityData.employeeId;
+    if (activityData.cardCode)    payload.CardCode        = activityData.cardCode;
+    if (activityData.subjectCode) payload.ActivitySubject = Number(activityData.subjectCode);
+    if (activityData.employeeId)  payload.HandledBy       = activityData.employeeId;
 
     await sl.post('Activities', payload);
 
@@ -219,7 +185,7 @@ async function confirmActivity(from) {
       `📋 ${activityData.action} · ${activityData.activityDate}\n` +
       `📝 ${activityData.notes}`
     );
-    console.log(`[CRM] Aktivite oluşturuldu: ${activityData.userName} → ${activityData.cardName}`);
+    console.log(`[CRM] Aktivite: ${activityData.userName} → ${activityData.cardName || '—'}`);
 
   } catch (err) {
     console.error('[CRM] Kayıt hatası:', err.message);
@@ -230,6 +196,77 @@ async function confirmActivity(from) {
 // ─────────────────────────────────────────────────────────────
 // Yardımcılar
 // ─────────────────────────────────────────────────────────────
+
+// İlk mesajdan ön-dolgu çıkar (regex, Claude yok)
+function _prefillFromText(text) {
+  const t = text.toLowerCase();
+
+  let action = 'Toplantı';
+  if (/(telefon|aradım|arama|call)/.test(t))        action = 'Telefon';
+  else if (/(görev|yapılacak|task)/.test(t))         action = 'Görev';
+  else if (/(not|yazdım|kaydet)/.test(t))            action = 'Not';
+  else if (/(mail|e-posta|eposta|email)/.test(t))    action = 'Email';
+
+  // Firma: "X ile" kalıbı
+  let cardName = '';
+  const m = text.match(/^(.+?)\s+ile\b/i) || text.match(/\b([A-ZÇĞİÖŞÜ][a-zA-ZÇĞİÖŞÜçğışöşü]{2,}(?:\s+[A-ZÇĞİÖŞÜ][a-zA-ZÇĞİÖŞÜçğışöşü]{1,})*)\s+ile\b/i);
+  if (m) cardName = m[1].trim();
+
+  // Not: virgül sonrasındaki kısım
+  const commaIdx = text.indexOf('.');
+  const notes = commaIdx > 0 ? text.slice(commaIdx + 1).trim() : '';
+
+  return { cardName, action, date: 'bugün', notes };
+}
+
+// "Firma: OKSİD\nTip: Toplantı\n..." → { firma, tip, tarih, konu, not }
+function _parseTemplate(text) {
+  const fields = {};
+  for (const line of text.split('\n')) {
+    const colon = line.indexOf(':');
+    if (colon < 0) continue;
+    const key = line.substring(0, colon).trim().toLowerCase()
+      .replace(/[^a-zçğışöşü]/g, '');
+    const val = line.substring(colon + 1).trim();
+    if (val) fields[key] = val;
+  }
+  return fields;
+}
+
+function _mapAction(val) {
+  if (!val) return null;
+  const v = val.toLowerCase();
+  if (/(toplantı|meeting|görüşme|ziyaret)/.test(v))  return 'Meeting';
+  if (/(telefon|phone|arama|call)/.test(v))           return 'Phone Call';
+  if (/(görev|task)/.test(v))                         return 'Task';
+  if (/(not|note)/.test(v))                           return 'Note';
+  if (/(mail|email|e-posta|eposta)/.test(v))          return 'Email';
+  return null;
+}
+
+function _parseDate(str) {
+  if (!str) return null;
+  const s = str.toLowerCase().trim();
+  if (s === 'bugün' || s === 'today' || s === '')
+    return new Date().toISOString().split('T')[0];
+  if (s === 'dün' || s === 'yesterday') {
+    const d = new Date(); d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null;
+}
+
+function _findSubjectCode(val) {
+  if (!val) return null;
+  const subjects = _getAdminSubjects();
+  const v = val.toLowerCase().trim();
+  const found = subjects.find(s => s.Name.toLowerCase() === v || s.Code.toLowerCase() === v);
+  return found?.Code || null;
+}
+
 function _actionEnum(action) {
   const map = {
     'Phone Call': 'cn_Conversation',
@@ -259,4 +296,11 @@ function _norm(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
-module.exports = { handleCreateActivity, confirmActivity, getActivityTypes, getActivitySubjects };
+module.exports = {
+  handleCreateActivity,
+  handleTemplateInput,
+  getAwaitingTemplate,
+  confirmActivity,
+  getActivityTypes,
+  getActivitySubjects,
+};

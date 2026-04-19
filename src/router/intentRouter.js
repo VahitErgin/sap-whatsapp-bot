@@ -22,7 +22,7 @@ const { sendText } = require('../services/whatsappService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
-const { handleCreateActivity, confirmActivity } = require('../modules/crmActivity');
+const { handleCreateActivity, handleTemplateInput, getAwaitingTemplate, confirmActivity } = require('../modules/crmActivity');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
@@ -89,7 +89,10 @@ async function handleIncoming({ from, text }) {
     if (upper === 'ACT_SAVE')   return await confirmActivity(from);
     if (upper === 'ACT_CANCEL') return await sendText(from, '🚫 Aktivite iptal edildi.');
 
-    // ── 4. Intent belirle (keyword → Claude Haiku fallback) ──
+    // ── 4. Şablon doldurma modu ───────────────────────────────
+    if (getAwaitingTemplate(from)) return await handleTemplateInput(from, text);
+
+    // ── 5. Intent belirle (keyword → Claude Haiku fallback) ──
     const intent = await detectIntentLocal(text);
     console.log(`[Router] (${from}/${user.license}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
 
