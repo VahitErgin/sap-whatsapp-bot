@@ -163,21 +163,24 @@ clarification_needed: false kullan (ZORUNLU) şu durumlarda:
 - "Veli Bey'in faturaları" → Invoices, $filter: contains(CardName,'Veli')
 - "C001" → SQL_CARI_EKSTRE, cardCode: "C001"  (tek kelime = bakiye sorgula)`;
 
-// ─── Claude: Sonuçları formatla ───────────────────────────────
-const FORMATTER_PROMPT = `Sen SAP Business One asistanısın.
-SAP'tan gelen ham veriyi kullanıcıya WhatsApp mesajı olarak formatla.
+// ─── Yerel formatter yardımcıları ─────────────────────────────
+const MONTHS_TR = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 
-KURALLAR:
-- Kısa ve öz yaz
-- Sayıları düzgün formatla (1.250,50 TL)
-- Tarihleri Türkçe yaz (15 Ocak 2024)
-- Emoji kullan ama abartma
-- Liste uzunsa max 10 satır göster, "ve X tane daha..." ekle
-- Toplam/özet bilgisi ekle
-- Türkçe yaz
-- Veri yoksa "Kayıt bulunamadı" de
+function fmtDate(val) {
+  if (!val) return '—';
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return String(val).substring(0, 10);
+    return `${d.getDate()} ${MONTHS_TR[d.getMonth()]} ${d.getFullYear()}`;
+  } catch { return String(val).substring(0, 10); }
+}
 
-Veri yoksa "Kayıt bulunamadı" de`;
+function fmtMoney(val, currency) {
+  const n   = parseFloat(val) || 0;
+  const abs = Math.abs(n).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const cur = (currency && currency !== 'TRY') ? ` ${currency}` : ' ₺';
+  return (n < 0 ? '-' : '') + abs + cur;
+}
 
 // ─── Çoklu cari seçimi için bekleyen sorgular (5 dakika TTL) ─
 const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt }
@@ -278,8 +281,8 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
       }
     }
 
-    // 5. Claude ile sonuçları formatla
-    const formatted = await formatResults(question, plan.queries, results);
+    // 5. Sonuçları formatla
+    const formatted = formatResultsLocal(question, plan.queries, results);
     await sendText(from, formatted);
 
   } catch (err) {
@@ -543,54 +546,151 @@ async function executeQueries(sl, queries, dbName) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Claude: Sonuçları WhatsApp formatına çevir
+// Yerel formatter – Claude API kullanılmaz
 // ─────────────────────────────────────────────────────────────
-async function formatResults(originalQuestion, queries, results, retries = 2) {
-  const dataForClaude = queries.map(q => ({
-    sorgu:  q.description,
-    sonuc:  results[q.id]?.data,
-    toplam: results[q.id]?.count,
-    hata:   results[q.id]?.error,
-  }));
+function formatResultsLocal(_question, queries, results) {
+  const parts = [];
 
-  const userMessage = `Kullanıcı sorusu: "${originalQuestion}"\n\nSAP'tan gelen veriler:\n${JSON.stringify(dataForClaude, null, 2)}\n\nBu veriyi kullanıcıya WhatsApp mesajı olarak formatla.`;
+  for (const q of queries) {
+    const r  = results[q.id];
+    if (!r) continue;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await axios.post(
-        'https://api.anthropic.com/v1/messages',
-        {
-          model:      'claude-haiku-4-5-20251001',
-          max_tokens: 1024,
-          system:     FORMATTER_PROMPT,
-          messages: [{ role: 'user', content: userMessage }],
-        },
-        {
-          headers: {
-            'x-api-key':         config.anthropic.apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type':      'application/json',
-          },
-          timeout: 30000,
-        }
-      );
-
-      return response.data?.content
-        ?.filter(b => b.type === 'text')
-        ?.map(b => b.text)
-        ?.join('') || '⚠️ Sonuç formatlanamadı.';
-    } catch (err) {
-      const status = err.response?.status;
-      if (status === 429 && attempt < retries) {
-        const wait = (attempt + 1) * 3000;
-        console.warn(`[Cashflow] Formatter 429, ${wait}ms bekle (deneme ${attempt + 1})`);
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-      console.error('[Cashflow] Formatter hatası:', err.response?.data || err.message);
-      return '⚠️ Sonuç formatlanamadı.';
+    if (r.error && r.error !== 'multiple_matches') {
+      parts.push(`⚠️ *${r.description}*\n${r.error}`);
+      continue;
     }
+
+    const ep   = q.endpoint;
+    const data = r.data || [];
+    const sec  = [];
+
+    if (ep === 'SQL_CARI_EKSTRE') {
+      const eks = data[0] || {};
+      sec.push(`💼 *${r.description || 'Cari Hesap Durumu'}*\n`);
+      if (!eks.acikKalemler?.length && !eks.toplamTRY) {
+        sec.push('✅ Açık bakiye yok.');
+      } else {
+        if (eks.toplamTRY > 0) sec.push(`🔴 *Borç (TRY): ${fmtMoney(eks.toplamTRY)}*`);
+        if (eks.toplamFC  > 0) sec.push(`🔴 *Borç (Döviz): ${fmtMoney(eks.toplamFC, eks.acikKalemler[0]?.ParaBirimi)}*`);
+        if (eks.bekleyenCekSayisi > 0) sec.push(`🗓 Bekleyen çek: ${eks.bekleyenCekSayisi} adet (${fmtMoney(eks.bekleyenCekTRY)})`);
+        const items = eks.acikKalemler || [];
+        if (items.length) {
+          sec.push('\n*Açık Kalemler:*');
+          items.slice(0, 8).forEach(k => {
+            const gec  = k.GecikmeGun > 0 ? ` ⚠️ ${k.GecikmeGun}g geç` : '';
+            const acik = k.KalanTRY > 0 ? fmtMoney(k.KalanTRY) : fmtMoney(k.KalanFC, k.ParaBirimi);
+            sec.push(`• ${fmtDate(k.VadeTarihi)} — ${String(k.Aciklama || '').substring(0, 28)} — *${acik}*${gec}`);
+          });
+          if (items.length > 8) sec.push(`_... ve ${items.length - 8} kalem daha_`);
+        }
+      }
+
+    } else if (ep === 'SQL_VADESI_GECENLER') {
+      sec.push(`📋 *${r.description}* (${r.count} cari)\n`);
+      let total = 0;
+      data.slice(0, 10).forEach(row => {
+        const bal = parseFloat(row.BakiyeTRY || 0);
+        total += bal;
+        sec.push(`• *${row.CardName}*: ${fmtMoney(bal)}${row.EnEskiVade ? ` · en eski: ${fmtDate(row.EnEskiVade)}` : ''}`);
+      });
+      if (data.length > 10) sec.push(`_... ve ${data.length - 10} cari daha_`);
+      sec.push(`\n💰 *Toplam Açık: ${fmtMoney(total)}*`);
+
+    } else if (ep === 'SQL_SATIS_KATEGORI') {
+      sec.push(`📊 *${r.description}* (${r.count} kategori)\n`);
+      let total = 0;
+      data.forEach((row, i) => {
+        const amt = parseFloat(row.ToplamSatis || 0);
+        total += amt;
+        sec.push(`${i + 1}. *${row.Kategori}* · ${row.SatisTemsilcisi}\n   ${fmtMoney(amt)} (${row.BelgeSayisi} fatura)`);
+      });
+      sec.push(`\n💰 *Toplam: ${fmtMoney(total)}*`);
+
+    } else if (ep === 'SQL_SATIS_MARKA') {
+      sec.push(`🏷 *${r.description}* (${r.count} marka)\n`);
+      let total = 0;
+      data.forEach((row, i) => {
+        const amt = parseFloat(row.ToplamSatis || 0);
+        total += amt;
+        sec.push(`${i + 1}. *${row.Marka}* · ${row.SatisTemsilcisi}\n   ${fmtMoney(amt)} (${row.BelgeSayisi} fatura)`);
+      });
+      sec.push(`\n💰 *Toplam: ${fmtMoney(total)}*`);
+
+    } else if (ep === 'SQL_SATIS_TEMSILCI') {
+      sec.push(`👤 *${r.description}* (${r.count} temsilci)\n`);
+      let total = 0;
+      data.forEach((row, i) => {
+        const amt = parseFloat(row.ToplamSatis || 0);
+        total += amt;
+        sec.push(`${i + 1}. *${row.SatisTemsilcisi}*: ${fmtMoney(amt)} (${row.BelgeSayisi} fatura)`);
+      });
+      sec.push(`\n💰 *Toplam: ${fmtMoney(total)}*`);
+
+    } else if (ep === 'SQL_STOK_SATISSIZ') {
+      sec.push(`📦 *${r.description}* (${r.count} ürün)\n`);
+      data.slice(0, 15).forEach((row, i) => {
+        const miktar = parseFloat(row.StokMiktari || 0).toLocaleString('tr-TR');
+        sec.push(`${i + 1}. *${row.UrunAdi}* (${row.ItemCode})\n   Stok: ${miktar} ${row.Birim || ''} · ${row.Kategori || ''}`);
+      });
+      if (data.length > 15) sec.push(`_... ve ${data.length - 15} ürün daha_`);
+
+    } else if (ep === 'SQL_HIZMET') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nKayıt bulunamadı.`);
+      } else {
+        sec.push(`🔧 *${r.description}* (${r.count} çağrı)\n`);
+        data.slice(0, 8).forEach(row => {
+          sec.push(
+            `#${row.CagriNo} *${row.Musteri}* [${row.Durum || row.StatusKod || ''}]` +
+            (row.SeriNo ? ` · SN: ${row.SeriNo}` : '') +
+            `\n   📅 ${fmtDate(row.AcilisTarihi)}` +
+            (row.Aciklama ? ` · ${String(row.Aciklama).substring(0, 40)}` : '')
+          );
+        });
+        if (data.length > 8) sec.push(`_... ve ${data.length - 8} çağrı daha_`);
+      }
+
+    } else {
+      // OData generic
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nKayıt bulunamadı.`);
+      } else {
+        sec.push(`📋 *${r.description}* (${r.count} kayıt)\n`);
+        let totalDoc = 0;
+        data.slice(0, 10).forEach(row => {
+          const line = _fmtODataRow(row);
+          if (line) sec.push(`• ${line}`);
+          totalDoc += parseFloat(row.DocTotal || 0);
+        });
+        if (data.length > 10) sec.push(`_... ve ${data.length - 10} kayıt daha_`);
+        if (totalDoc > 0) sec.push(`\n💰 *Toplam: ${fmtMoney(totalDoc)}*`);
+      }
+    }
+
+    if (sec.length) parts.push(sec.join('\n'));
   }
+
+  return parts.join('\n\n') || '📭 Sonuç bulunamadı.';
+}
+
+function _fmtODataRow(row) {
+  const p = [];
+  if (row.DocNum)    p.push(`#${row.DocNum}`);
+  if (row.CardName)  p.push(`*${row.CardName}*`);
+  if (row.DocDate)   p.push(fmtDate(row.DocDate));
+  if (row.DocDueDate) p.push(`Vade: ${fmtDate(row.DocDueDate)}`);
+  if (row.DocTotal)  p.push(fmtMoney(row.DocTotal, row.DocCurrency));
+  if (row.DocumentStatus) p.push(row.DocumentStatus === 'bost_Open' ? '🟢 Açık' : '⚫ Kapalı');
+  if (p.length) return p.join(' · ');
+
+  // Hiçbir bilinen alan yoksa ilk 4 non-null alanı yaz
+  let n = 0;
+  for (const [k, v] of Object.entries(row)) {
+    if (!v || typeof v === 'object' || k.includes('odata')) continue;
+    p.push(`${k}: ${v}`);
+    if (++n >= 4) break;
+  }
+  return p.join(' · ');
 }
 
 module.exports = { getCashflow, handleQuery, handleCardSelection };

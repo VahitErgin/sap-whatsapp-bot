@@ -16,8 +16,6 @@
  *   REJECT:<BELGE_NO>  → approval
  */
 
-const axios  = require('axios');
-const config = require('../config/config');
 const { sendText } = require('../services/whatsappService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
@@ -31,43 +29,6 @@ function getModules() {
   if (!approval) approval = require('../modules/approval');
   if (!support)  support  = require('../modules/support');
 }
-
-// ─── Claude: Intent belirleme promptu ────────────────────────
-const INTENT_SYSTEM = `Sen SAP Business One WhatsApp asistanının yönlendirici katmanısın.
-Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini belirle.
-
-MODÜLLER:
-- "cashflow"  → SAP veri sorguları ve listeleme: bakiye, fatura, stok, nakit akışı, cari bilgisi, sipariş listesi, ödeme, tahsilat, raporlar, veri görüntüleme
-- "approval"  → Satın alma SİPARİŞİ ONAYLAMA veya REDDETME aksiyonu (aksiyon kelimesi gerekir)
-- "crm"       → Aktivite OLUŞTURMA: toplantı notu, telefon görüşmesi kaydı, görev ekleme, aktivite ekle
-- "login"     → Sisteme giriş: "giriş yap", "login", "oturum aç"
-- "logout"    → Çıkış: "çıkış yap", "logout", "oturumu kapat"
-- "support"   → SAP hata mesajları, nasıl yapılır soruları, menü yolları, teknik destek
-- "help"      → Genel yardım menüsü istekleri (yardım, menü, ne yapabilirsin gibi)
-
-KRİTİK AYRIMI:
-- Aktivite GÖRME/LİSTELEME → cashflow | Aktivite OLUŞTURMA/EKLEME → crm
-- Sipariş GÖRME → cashflow | Sipariş ONAYLAMA → approval
-
-YANIT FORMATI (sadece JSON):
-{
-  "intent": "cashflow" | "approval" | "crm" | "login" | "logout" | "support" | "help",
-  "confidence": 0.0-1.0,
-  "reason": "Kısa açıklama"
-}
-
-ÖRNEKLER:
-- "C001 bakiyesi nedir" → cashflow
-- "Stokta vida var mı" → cashflow
-- "MB00001'in aktiviteleri" → cashflow
-- "ABC ile bugün toplantı yaptık, teklif konuştuk" → crm
-- "Telefon görüşmesi ekle: Endeks firmasını aradım" → crm
-- "Aktivite oluştur" → crm
-- "456 numaralı siparişi onayla" → approval
-- "Giriş yap" → login
-- "Çıkış yap" → logout
-- "-10 hatası aldım" → support
-- "Yardım" → help`;
 
 // ─────────────────────────────────────────────────────────────
 // Ana yönlendirici
@@ -126,8 +87,8 @@ async function handleIncoming({ from, text }) {
     if (upper === 'ACT_SAVE')   return await confirmActivity(from);
     if (upper === 'ACT_CANCEL') return await sendText(from, '🚫 Aktivite iptal edildi.');
 
-    // ── 4. Claude ile intent belirle ─────────────────────────
-    const intent = await detectIntent(text);
+    // ── 4. Keyword ile intent belirle ────────────────────────
+    const intent = detectIntentLocal(text);
     console.log(`[Router] (${from}/${user.license}) "${text}" → ${intent.intent} (${(intent.confidence * 100).toFixed(0)}%)`);
 
     // ── 5. Lisans kontrolü ───────────────────────────────────
@@ -196,39 +157,46 @@ async function handleIncoming({ from, text }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Claude: Intent tespiti  (Haiku – hızlı ve ucuz)
+// Keyword tabanlı intent tespiti (Claude API kullanılmaz)
 // ─────────────────────────────────────────────────────────────
-async function detectIntent(text) {
-  try {
-    const response = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model:      'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        system:     INTENT_SYSTEM,
-        messages: [{ role: 'user', content: text }],
-      },
-      {
-        headers: {
-          'x-api-key':         config.anthropic.apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type':      'application/json',
-        },
-      }
-    );
+function detectIntentLocal(text) {
+  const t = text.toLowerCase().trim();
 
-    const raw = response.data?.content
-      ?.filter(b => b.type === 'text')
-      ?.map(b => b.text)
-      ?.join('') || '{}';
+  if (/\bgiriş\b/.test(t) || /\blogin\b/.test(t) || /oturum\s*aç/.test(t))
+    return { intent: 'login', confidence: 0.97, reason: 'keyword' };
 
-    const cleaned = raw.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleaned);
+  if (/\bçıkış\b/.test(t) || /\blogout\b/.test(t) || /oturumu?\s*kapat/.test(t))
+    return { intent: 'logout', confidence: 0.97, reason: 'keyword' };
 
-  } catch (err) {
-    console.warn('[Router] Intent tespiti başarısız, support\'a düşüyor:', err.message);
-    return { intent: 'support', confidence: 0.5, reason: 'fallback' };
-  }
+  if (/^(yardım|yardım\?|menü|ne yapabilirsin(\?)?)$/.test(t))
+    return { intent: 'help', confidence: 0.97, reason: 'keyword' };
+
+  if (/\bonayla\b/.test(t) || /\breddet\b/.test(t) || /bekleyen\s+onay/.test(t) || /satın\s*alma\s+onay/.test(t))
+    return { intent: 'approval', confidence: 0.92, reason: 'keyword' };
+
+  // CRM: aktivite OLUŞTURMA (listeleme → cashflow'a düşer)
+  if (
+    /aktivite\s+(oluştur|ekle|yaz|kaydet)/.test(t) ||
+    /toplantı\s+(yaptık|notu|ekle|oluştur|kaydı)/.test(t) ||
+    /telefon\s+görüşmesi\s+(ekle|yaptım|kaydı|oluştur)/.test(t) ||
+    /görüşme\s+(ekle|yaptık|notu)/.test(t) ||
+    /\b(not|görev)\s+ekle\b/.test(t) ||
+    /\b(aradım|ziyaret\s+ettim|görüştük|konuştuk|toplantı\s+yaptık)\b/.test(t)
+  )
+    return { intent: 'crm', confidence: 0.88, reason: 'keyword' };
+
+  // SAP destek / hata soruları
+  if (
+    /-\d+\s*(hatası|kodu|err)/.test(t) ||
+    /hata\s+(aldım|oluştu|veriyor)/.test(t) ||
+    /nasıl\s+(yapılır|iptal|açılır|kapatılır|silinir)/.test(t) ||
+    /menü\s+yolu/.test(t) ||
+    /dönem\s+kapalı/.test(t)
+  )
+    return { intent: 'support', confidence: 0.88, reason: 'keyword' };
+
+  // Default: cashflow (SAP veri sorgusu)
+  return { intent: 'cashflow', confidence: 0.75, reason: 'default' };
 }
 
 // ─────────────────────────────────────────────────────────────
