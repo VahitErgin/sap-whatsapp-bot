@@ -12,7 +12,7 @@ const fs   = require('fs');
 const path = require('path');
 
 const { sendText }           = require('./whatsappService');
-const { getOnayBekleyenler, getVadesiGecenler, getCustomerByPhone } = require('../modules/sapDb');
+const { getOnayBekleyenler, getVadesiGecenler, getCustomerByPhone, runRawQuery } = require('../modules/sapDb');
 
 const TASKS_FILE = path.join(__dirname, '../../data/scheduled-tasks.json');
 const DATA_DIR   = path.join(__dirname, '../../data');
@@ -26,6 +26,7 @@ const TASK_TYPES = {
   overdue_orders:     'Gecikmiş Siparişler',
   sales_performance:  'Satış Temsilcisi Performansı',
   collection_target:  'Günün Tahsilat Hedefi',
+  custom_query:       'Özel SQL Sorgusu',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -43,10 +44,11 @@ function saveTasks(tasks) {
   fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2), 'utf8');
 }
 
-function createTask({ name, type, time, phones, enabled = true }) {
+function createTask({ name, type, time, phones, query, enabled = true }) {
   if (!TASK_TYPES[type])  throw new Error('Geçersiz görev tipi');
   if (!/^\d{2}:\d{2}$/.test(time)) throw new Error('Saat HH:MM formatında olmalı');
   if (!phones?.length)    throw new Error('En az bir telefon numarası gerekli');
+  if (type === 'custom_query' && !query?.trim()) throw new Error('SQL sorgusu gerekli');
 
   const tasks = readTasks();
   const task  = {
@@ -57,6 +59,7 @@ function createTask({ name, type, time, phones, enabled = true }) {
     phones:    phones.map(p => String(p).replace(/\D/g, '')),
     enabled:   Boolean(enabled),
     createdAt: new Date().toISOString(),
+    ...(type === 'custom_query' ? { query: query.trim() } : {}),
   };
   tasks.push(task);
   saveTasks(tasks);
@@ -70,6 +73,10 @@ function updateTask(id, updates) {
 
   if (updates.type && !TASK_TYPES[updates.type]) throw new Error('Geçersiz görev tipi');
   if (updates.time && !/^\d{2}:\d{2}$/.test(updates.time)) throw new Error('Saat HH:MM formatında olmalı');
+  const effectiveType = updates.type || tasks[idx].type;
+  if (effectiveType === 'custom_query' && updates.query !== undefined && !updates.query?.trim()) {
+    throw new Error('SQL sorgusu gerekli');
+  }
 
   tasks[idx] = { ...tasks[idx], ...updates, id };
   saveTasks(tasks);
@@ -131,6 +138,25 @@ async function runOverdueBalances(phone) {
   );
 }
 
+async function runCustomQuery(phone, task) {
+  const rows = await runRawQuery(task.query);
+  if (!rows.length) {
+    await sendText(phone, `📊 *${task.name}*\n\nSorgu sonucu boş döndü.`);
+    return;
+  }
+
+  const cols    = Object.keys(rows[0]);
+  const display = rows.slice(0, 10);
+  const lines   = display.map(r =>
+    cols.map(c => `${c}: ${r[c] ?? '—'}`).join(' | ')
+  );
+  const footer = rows.length > 10 ? `\n_...toplam ${rows.length} kayıt, ilk 10 gösteriliyor_` : '';
+
+  await sendText(phone,
+    `📊 *${task.name}*\n\n${lines.join('\n')}${footer}`
+  );
+}
+
 async function runPlaceholder(phone, taskName) {
   await sendText(phone,
     `📊 *${taskName}* raporu hazırlanıyor.\n\nBu rapor tipi yakında aktif olacaktır.`
@@ -143,6 +169,7 @@ async function runTask(task) {
       switch (task.type) {
         case 'pending_approvals': await runPendingApprovals(phone); break;
         case 'overdue_balances':  await runOverdueBalances(phone);  break;
+        case 'custom_query':      await runCustomQuery(phone, task); break;
         default:                  await runPlaceholder(phone, task.name); break;
       }
       console.log(`[Scheduler] ✓ ${task.name} → ${phone}`);

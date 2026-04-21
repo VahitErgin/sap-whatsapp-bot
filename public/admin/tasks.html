@@ -106,6 +106,17 @@
         <div id="phoneError" class="text-danger mt-1" style="font-size:.78rem;display:none"></div>
 
         <div id="typeDesc" class="mt-3 p-2 rounded" style="background:rgba(107,178,235,.08);font-size:.8rem;color:#94a3b8;display:none"></div>
+
+        <!-- Özel SQL Sorgusu -->
+        <div id="queryWrap" class="mt-3" style="display:none">
+          <label class="form-label" style="font-size:.82rem;color:#94a3b8">SQL Sorgusu <span class="text-danger">*</span></label>
+          <textarea id="taskQuery" rows="6" class="form-control form-control-sm font-monospace"
+            placeholder="SELECT TOP 10 CardCode, CardName, Balance FROM OCRD WHERE Balance > 0 ORDER BY Balance DESC"
+            style="background:#0d1117;color:#e2e8f0;border-color:rgba(255,255,255,.15);font-size:.8rem;resize:vertical"></textarea>
+          <div class="mt-1" style="font-size:.75rem;color:#64748b">
+            <i class="bi bi-shield-check me-1"></i>Yalnızca SELECT ve WITH sorguları çalıştırılabilir. Sonuçların ilk 10 satırı gönderilir.
+          </div>
+        </div>
       </div>
       <div class="modal-footer" style="border-color:rgba(255,255,255,.1)">
         <div id="modalError" class="text-danger me-auto" style="font-size:.82rem"></div>
@@ -180,6 +191,7 @@ function renderCards(tasks) {
             <i class="bi bi-telephone me-1"></i>
             ${(t.phones || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(p)}</span>`).join('')}
           </div>
+          ${t.query ? `<div class="mt-2 p-1 rounded font-monospace" style="font-size:.72rem;color:#7dd3fc;background:#0d1117;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="${esc(t.query)}">${esc(t.query)}</div>` : ''}
         </div>
         <div class="card-footer d-flex gap-2 py-2" style="background:transparent;border-color:rgba(255,255,255,.08)">
           <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="editTask(${esc2(t)})">
@@ -199,11 +211,12 @@ function renderCards(tasks) {
 
 function openModal(task) {
   _phones = task ? [...(task.phones || [])] : [];
-  document.getElementById('editId').value       = task?.id || '';
-  document.getElementById('taskType').value     = task?.type || '';
-  document.getElementById('taskName').value     = task?.name || '';
-  document.getElementById('taskTime').value     = task?.time || '08:00';
+  document.getElementById('editId').value        = task?.id || '';
+  document.getElementById('taskType').value      = task?.type || '';
+  document.getElementById('taskName').value      = task?.name || '';
+  document.getElementById('taskTime').value      = task?.time || '08:00';
   document.getElementById('taskEnabled').checked = task?.enabled !== false;
+  document.getElementById('taskQuery').value     = task?.query || '';
   document.getElementById('modalTitle').textContent = task ? 'Görevi Düzenle' : 'Yeni Görev';
   document.getElementById('modalError').textContent = '';
   document.getElementById('newPhone').value = '';
@@ -220,11 +233,12 @@ function onTypeChange(val) {
   const v    = val || document.getElementById('taskType').value;
   const desc = document.getElementById('typeDesc');
   if (TYPE_DESCS[v]) {
-    desc.textContent    = TYPE_DESCS[v];
-    desc.style.display  = '';
+    desc.textContent   = TYPE_DESCS[v];
+    desc.style.display = '';
   } else {
-    desc.style.display  = 'none';
+    desc.style.display = 'none';
   }
+  document.getElementById('queryWrap').style.display = v === 'custom_query' ? '' : 'none';
 }
 
 function renderPhones() {
@@ -267,14 +281,16 @@ async function saveTask() {
   const name    = document.getElementById('taskName').value.trim();
   const time    = document.getElementById('taskTime').value;
   const enabled = document.getElementById('taskEnabled').checked;
+  const query   = document.getElementById('taskQuery').value.trim();
   const errEl   = document.getElementById('modalError');
 
-  if (!type)          return errEl.textContent = 'Görev tipi seçin.';
-  if (!time)          return errEl.textContent = 'Saat seçin.';
+  if (!type)           return errEl.textContent = 'Görev tipi seçin.';
+  if (!time)           return errEl.textContent = 'Saat seçin.';
   if (!_phones.length) return errEl.textContent = 'En az bir telefon numarası ekleyin.';
+  if (type === 'custom_query' && !query) return errEl.textContent = 'SQL sorgusu gerekli.';
   errEl.textContent = '';
 
-  const body = { type, name, time, phones: _phones, enabled };
+  const body = { type, name, time, phones: _phones, enabled, ...(type === 'custom_query' ? { query } : {}) };
   const url  = id ? `/admin/api/tasks/${id}` : '/admin/api/tasks';
   const meth = id ? 'PATCH' : 'POST';
 

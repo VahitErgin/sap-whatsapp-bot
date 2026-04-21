@@ -642,4 +642,18 @@ async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz };
+// ─────────────────────────────────────────────────────────────
+// Ham SQL sorgusu çalıştır (sadece SELECT — admin zamanlanmış görevler için)
+// ─────────────────────────────────────────────────────────────
+async function runRawQuery(queryText, dbName) {
+  const upper = queryText.trim().toUpperCase();
+  if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
+    throw new Error('Güvenlik: Yalnızca SELECT ve WITH sorguları çalıştırılabilir.');
+  }
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  const result  = await request.query(queryText);
+  return result.recordset;
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, runRawQuery };
