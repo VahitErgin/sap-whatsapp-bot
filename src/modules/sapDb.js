@@ -245,7 +245,7 @@ async function getVadesiGecenler({ refDate, cardType, dbName }) {
 //   statusFilter → 'open' | 'closed' | null (hepsi)
 //   top        → kaç kayıt (default 20)
 // ─────────────────────────────────────────────────────────────
-async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top = 20, dbName }) {
+async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateFrom, dateTo, top = 20, dbName }) {
   const pool    = await getPool(dbName);
   const request = pool.request();
   request.input('Top', sql.Int, top);
@@ -264,10 +264,20 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, top =
     request.input('CallId', sql.Int, parseInt(callId));
     conditions.push('srvcCallID = @CallId');
   }
-  if (statusFilter === 'open') {
-    conditions.push("status = -1");   // -1 = açık
-  } else if (statusFilter === 'closed') {
-    conditions.push("status = 0");    // 0 = kapalı
+  if (dateFrom) {
+    request.input('DateFrom', sql.Date, new Date(dateFrom));
+    conditions.push('createDate >= @DateFrom');
+  }
+  if (dateTo) {
+    request.input('DateTo', sql.Date, new Date(dateTo));
+    conditions.push('createDate <= @DateTo');
+  }
+  // OSCS: -3=Açık(İşleniyor), -2=Beklemede, -1=Kapalı
+  if (statusFilter === 'closed') {
+    conditions.push("status = -1");
+  } else {
+    // open veya filtre yok → kapalıları getirme
+    conditions.push("status IN (-3, -2)");
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
