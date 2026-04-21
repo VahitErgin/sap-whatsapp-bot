@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zamanlanmış Görevler – SAP WA Bot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="d-flex">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <i class="bi bi-robot sidebar-logo"></i>
+      <div>
+        <div class="sidebar-title">SAP WA Bot</div>
+        <div class="sidebar-sub">Yönetim Paneli</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="/admin/approvers" class="nav-link"><i class="bi bi-people"></i> Onay Yetkilileri</a>
+      <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/tasks"     class="nav-link active"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/logs"      class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
+      <a href="/admin/settings"  class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" style="color:rgba(255,100,100,.7);text-decoration:none;font-size:.8rem">
+        <i class="bi bi-box-arrow-right me-1"></i>Çıkış Yap
+      </a>
+    </div>
+  </div>
+
+  <!-- İçerik -->
+  <div id="content">
+    <div class="page-header">
+      <h4><i class="bi bi-clock-history me-2" style="color:#6cb2eb"></i>Zamanlanmış Görevler</h4>
+      <button class="btn btn-primary btn-sm" onclick="openModal()">
+        <i class="bi bi-plus-lg me-1"></i>Yeni Görev
+      </button>
+    </div>
+
+    <div id="taskList" class="row g-3"></div>
+    <div id="emptyState" class="text-center py-5 text-muted" style="display:none">
+      <i class="bi bi-clock" style="font-size:2.5rem;opacity:.3"></i>
+      <p class="mt-3">Henüz zamanlanmış görev yok.<br>
+        <a href="#" onclick="openModal()">Yeni görev ekleyin.</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Görev Ekle/Düzenle -->
+<div class="modal fade" id="taskModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="background:#1e2235;color:#e2e8f0;border:1px solid rgba(255,255,255,.1)">
+      <div class="modal-header" style="border-color:rgba(255,255,255,.1)">
+        <h5 class="modal-title" id="modalTitle">Yeni Görev</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editId">
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label" style="font-size:.82rem;color:#94a3b8">Görev Tipi</label>
+            <select id="taskType" class="form-select form-select-sm" style="background:#131929;color:#e2e8f0;border-color:rgba(255,255,255,.15)" onchange="onTypeChange()">
+              <option value="">Seçin...</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" style="font-size:.82rem;color:#94a3b8">Görev Adı</label>
+            <input type="text" id="taskName" class="form-control form-control-sm" placeholder="Opsiyonel – boş bırakılırsa tip adı kullanılır"
+              style="background:#131929;color:#e2e8f0;border-color:rgba(255,255,255,.15)">
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:.82rem;color:#94a3b8">Gönderim Saati</label>
+            <input type="time" id="taskTime" class="form-control form-control-sm"
+              style="background:#131929;color:#e2e8f0;border-color:rgba(255,255,255,.15)">
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="taskEnabled" checked>
+              <label class="form-check-label" for="taskEnabled" style="font-size:.85rem">Aktif</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telefon Yönetimi -->
+        <div class="mb-2" style="font-size:.82rem;color:#94a3b8">Telefon Numaraları</div>
+        <div id="phoneList" class="mb-2"></div>
+        <div class="d-flex gap-2">
+          <input type="text" id="newPhone" class="form-control form-control-sm" placeholder="905XXXXXXXXX (ülke koduyla)"
+            style="background:#131929;color:#e2e8f0;border-color:rgba(255,255,255,.15)">
+          <button class="btn btn-outline-secondary btn-sm px-3" onclick="addPhone()">
+            <i class="bi bi-plus-lg"></i>
+          </button>
+        </div>
+        <div id="phoneError" class="text-danger mt-1" style="font-size:.78rem;display:none"></div>
+
+        <div id="typeDesc" class="mt-3 p-2 rounded" style="background:rgba(107,178,235,.08);font-size:.8rem;color:#94a3b8;display:none"></div>
+      </div>
+      <div class="modal-footer" style="border-color:rgba(255,255,255,.1)">
+        <div id="modalError" class="text-danger me-auto" style="font-size:.82rem"></div>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveTask()">
+          <i class="bi bi-check2 me-1"></i>Kaydet
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let _types   = {};
+let _phones  = [];
+let _bsModal = null;
+
+const TYPE_DESCS = {
+  pending_approvals: 'Belirtilen saatte kullanıcının bekleyen SAP onaylarını listeler. Her onay yetkilisine kendi bekleyen belgelerini gönderir.',
+  overdue_balances:  'Vadesi geçmiş veya yaklaşan bakiyeleri ilgili kişilere gönderir. Telefon numarasına eşleşen müşteri varsa ona ait bakiye, yoksa genel özet gönderilir.',
+  overdue_orders:    'Gecikmiş siparişleri ilgili kullanıcılara raporlar. (Yakında aktif olacak)',
+  sales_performance: 'Satış temsilcisine bu ay kaç ziyaret ve sipariş yaptığını raporlar. (Yakında aktif olacak)',
+  collection_target: 'Günlük tahsilat hedefini ve gerçekleşen tahsilatı raporlar. (Yakında aktif olacak)',
+};
+
+async function load() {
+  const res  = await fetch('/admin/api/tasks');
+  const data = await res.json();
+  _types = data.types || {};
+
+  // Tip seçeneği doldur
+  const sel = document.getElementById('taskType');
+  sel.innerHTML = '<option value="">Seçin...</option>';
+  for (const [k, v] of Object.entries(_types)) {
+    sel.innerHTML += `<option value="${k}">${v}</option>`;
+  }
+
+  renderCards(data.tasks || []);
+}
+
+function renderCards(tasks) {
+  const list  = document.getElementById('taskList');
+  const empty = document.getElementById('emptyState');
+
+  if (!tasks.length) {
+    list.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = tasks.map(t => `
+    <div class="col-md-6 col-lg-4">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center py-2">
+          <span style="font-size:.88rem;font-weight:600">${esc(t.name)}</span>
+          <div class="d-flex gap-1">
+            <span class="badge ${t.enabled ? 'bg-success' : 'bg-secondary'}" style="font-size:.7rem">
+              ${t.enabled ? 'Aktif' : 'Pasif'}
+            </span>
+          </div>
+        </div>
+        <div class="card-body py-3">
+          <div class="mb-2" style="font-size:.8rem;color:#94a3b8">
+            <i class="bi bi-tag me-1"></i>${esc(_types[t.type] || t.type)}
+          </div>
+          <div class="mb-2" style="font-size:.8rem;color:#94a3b8">
+            <i class="bi bi-clock me-1"></i>Her gün <strong style="color:#e2e8f0">${esc(t.time)}</strong>
+          </div>
+          <div style="font-size:.78rem;color:#94a3b8">
+            <i class="bi bi-telephone me-1"></i>
+            ${(t.phones || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(p)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="card-footer d-flex gap-2 py-2" style="background:transparent;border-color:rgba(255,255,255,.08)">
+          <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="editTask(${esc2(t)})">
+            <i class="bi bi-pencil me-1"></i>Düzenle
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="deleteTask('${t.id}', '${esc(t.name)}')">
+            <i class="bi bi-trash"></i>
+          </button>
+          <button class="btn btn-outline-${t.enabled ? 'warning' : 'success'} btn-sm" onclick="toggleTask('${t.id}', ${!t.enabled})">
+            <i class="bi bi-${t.enabled ? 'pause' : 'play'}"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openModal(task) {
+  _phones = task ? [...(task.phones || [])] : [];
+  document.getElementById('editId').value       = task?.id || '';
+  document.getElementById('taskType').value     = task?.type || '';
+  document.getElementById('taskName').value     = task?.name || '';
+  document.getElementById('taskTime').value     = task?.time || '08:00';
+  document.getElementById('taskEnabled').checked = task?.enabled !== false;
+  document.getElementById('modalTitle').textContent = task ? 'Görevi Düzenle' : 'Yeni Görev';
+  document.getElementById('modalError').textContent = '';
+  document.getElementById('newPhone').value = '';
+  document.getElementById('phoneError').style.display = 'none';
+  onTypeChange(task?.type);
+  renderPhones();
+  _bsModal = _bsModal || new bootstrap.Modal(document.getElementById('taskModal'));
+  _bsModal.show();
+}
+
+function editTask(task) { openModal(task); }
+
+function onTypeChange(val) {
+  const v    = val || document.getElementById('taskType').value;
+  const desc = document.getElementById('typeDesc');
+  if (TYPE_DESCS[v]) {
+    desc.textContent    = TYPE_DESCS[v];
+    desc.style.display  = '';
+  } else {
+    desc.style.display  = 'none';
+  }
+}
+
+function renderPhones() {
+  document.getElementById('phoneList').innerHTML = _phones.length
+    ? _phones.map((p, i) => `
+        <span class="badge bg-light text-dark border me-1 mb-1 py-2 px-2" style="font-size:.8rem">
+          <i class="bi bi-telephone me-1"></i>${esc(p)}
+          <button type="button" class="btn-close ms-2" style="font-size:.6rem" onclick="removePhone(${i})"></button>
+        </span>`).join('')
+    : '<span style="font-size:.8rem;color:#64748b">Henüz telefon eklenmedi.</span>';
+}
+
+function addPhone() {
+  const raw   = document.getElementById('newPhone').value.trim().replace(/\D/g, '');
+  const errEl = document.getElementById('phoneError');
+  if (!raw || raw.length < 10) {
+    errEl.textContent    = 'Geçerli bir numara girin (ülke koduyla, min 10 hane)';
+    errEl.style.display  = '';
+    return;
+  }
+  if (_phones.includes(raw)) {
+    errEl.textContent    = 'Bu numara zaten ekli';
+    errEl.style.display  = '';
+    return;
+  }
+  errEl.style.display = 'none';
+  _phones.push(raw);
+  document.getElementById('newPhone').value = '';
+  renderPhones();
+}
+
+function removePhone(i) {
+  _phones.splice(i, 1);
+  renderPhones();
+}
+
+async function saveTask() {
+  const id      = document.getElementById('editId').value;
+  const type    = document.getElementById('taskType').value;
+  const name    = document.getElementById('taskName').value.trim();
+  const time    = document.getElementById('taskTime').value;
+  const enabled = document.getElementById('taskEnabled').checked;
+  const errEl   = document.getElementById('modalError');
+
+  if (!type)          return errEl.textContent = 'Görev tipi seçin.';
+  if (!time)          return errEl.textContent = 'Saat seçin.';
+  if (!_phones.length) return errEl.textContent = 'En az bir telefon numarası ekleyin.';
+  errEl.textContent = '';
+
+  const body = { type, name, time, phones: _phones, enabled };
+  const url  = id ? `/admin/api/tasks/${id}` : '/admin/api/tasks';
+  const meth = id ? 'PATCH' : 'POST';
+
+  try {
+    const res  = await fetch(url, { method: meth, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Hata'; return; }
+    _bsModal.hide();
+    load();
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+}
+
+async function deleteTask(id, name) {
+  if (!confirm(`"${name}" görevini silmek istediğinizden emin misiniz?`)) return;
+  await fetch(`/admin/api/tasks/${id}`, { method: 'DELETE' });
+  load();
+}
+
+async function toggleTask(id, enabled) {
+  await fetch(`/admin/api/tasks/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  load();
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function esc2(obj) {
+  return "'" + JSON.stringify(obj).replace(/'/g, "\\'") + "'";
+}
+
+load();
+</script>
+</body>
+</html>

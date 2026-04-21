@@ -10,6 +10,7 @@ const { listTemplates, createTemplate, deleteTemplate } = require('./templateSer
 const { getConnection }                    = require('../modules/sapClient');
 const { readEnv, updateEnv }               = require('./configService');
 const { readLogs }                         = require('../services/logService');
+const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('../services/taskService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -54,6 +55,7 @@ router.get('/approvers', requireAuth, (req, res) => res.sendFile(path.join(viewD
 router.get('/templates', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'templates.html')));
 router.get('/settings',  requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'settings.html')));
 router.get('/logs',      requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'logs.html')));
+router.get('/tasks',     requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'tasks.html')));
 
 // ─────────────────────────────────────────────────────────────
 // Kimlik Doğrulama
@@ -229,6 +231,37 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.CRM_ACTIVE_SUBJECTS !== undefined) process.env.CRM_ACTIVE_SUBJECTS = updates.CRM_ACTIVE_SUBJECTS;
 
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Zamanlanmış Görevler
+// ─────────────────────────────────────────────────────────────
+router.get('/api/tasks', requireAuth, (req, res) => {
+  res.json({ tasks: readTasks(), types: TASK_TYPES });
+});
+
+router.post('/api/tasks', requireAuth, (req, res) => {
+  try {
+    res.json(createTask(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/api/tasks/:id', requireAuth, (req, res) => {
+  try {
+    res.json(updateTask(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/api/tasks/:id', requireAuth, (req, res) => {
+  try {
+    res.json(deleteTask(req.params.id));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
