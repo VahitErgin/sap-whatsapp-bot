@@ -9,6 +9,7 @@ const { readApprovers, addApprover, removeApprover } = require('./approverServic
 const { listTemplates, createTemplate, deleteTemplate } = require('./templateService');
 const { getConnection }                    = require('../modules/sapClient');
 const { readEnv, updateEnv }               = require('./configService');
+const { readLogs }                         = require('../services/logService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -52,6 +53,7 @@ router.get('/',          requireAuth, (req, res) => res.sendFile(path.join(viewD
 router.get('/approvers', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'approvers.html')));
 router.get('/templates', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'templates.html')));
 router.get('/settings',  requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'settings.html')));
+router.get('/logs',      requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'logs.html')));
 
 // ─────────────────────────────────────────────────────────────
 // Kimlik Doğrulama
@@ -227,6 +229,21 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.CRM_ACTIVE_SUBJECTS !== undefined) process.env.CRM_ACTIVE_SUBJECTS = updates.CRM_ACTIVE_SUBJECTS;
 
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Mesaj Logları
+// ─────────────────────────────────────────────────────────────
+router.get('/api/logs', requireAuth, (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  const from  = req.query.from || today;
+  const to    = req.query.to   || today;
+  try {
+    const entries = readLogs(from, to);
+    res.json(entries);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────

@@ -18,7 +18,8 @@
 
 const axios  = require('axios');
 const config = require('../config/config');
-const { sendText } = require('../services/whatsappService');
+const { sendText }   = require('../services/whatsappService');
+const { writeLog }   = require('../services/logService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
@@ -43,6 +44,7 @@ function getModules() {
 // ─────────────────────────────────────────────────────────────
 async function handleIncoming({ from, text }) {
   getModules();
+  writeLog({ phone: from, dir: 'in', text: text.substring(0, 500) });
   const upper = text.toUpperCase().trim();
 
   try {
@@ -56,6 +58,7 @@ async function handleIncoming({ from, text }) {
           userCode:   awaitingPw.userCode,
           employeeId: result.employeeId,
           userName:   awaitingPw.userName,
+          b1session:  result.b1session,
         });
         const ttl = Math.round(parseInt(process.env.SESSION_TIMEOUT_MINUTES || '480') / 60);
         return await sendText(from,
@@ -91,6 +94,10 @@ async function handleIncoming({ from, text }) {
       const cardCode = sepIdx >= 0 ? payload.slice(0, sepIdx).trim() : payload.trim();
       const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
       return await cashflow.handleCardSelection({ from, cardCode, cardName });
+    }
+    if (text.startsWith('ONAY_DETAIL:')) {
+      const wddCode = text.slice('ONAY_DETAIL:'.length).trim();
+      return await approval.showOrderDetail({ from, wddCode });
     }
     if (upper === 'ACT_SAVE')    return await confirmActivity(from);
     if (upper === 'LEAD_SAVE')   return await confirmLead(from);

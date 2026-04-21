@@ -1,6 +1,7 @@
 'use strict';
 const axios  = require('axios');
 const config = require('../config/config');
+const { writeLog } = require('./logService');
 
 const BASE = `${config.whatsapp.apiUrl}/${config.whatsapp.phoneNumberId}/messages`;
 const HEADERS = {
@@ -98,12 +99,24 @@ async function _send(to, messagePayload) {
     }, { headers: HEADERS });
 
     console.log(`[WA] Gönderildi → ${to} | msgId: ${res.data?.messages?.[0]?.id}`);
+    writeLog({ phone: to, dir: 'out', type: messagePayload.type, preview: _preview(messagePayload) });
     return res.data;
   } catch (err) {
     const detail = err.response?.data || err.message;
     console.error(`[WA] Gönderme hatası → ${to}:`, JSON.stringify(detail));
     throw err;
   }
+}
+
+function _preview(payload) {
+  if (payload.type === 'text') return (payload.text?.body || '').substring(0, 120);
+  if (payload.type === 'interactive') {
+    const h = payload.interactive?.header?.text || '';
+    const b = payload.interactive?.body?.text   || '';
+    return `${h} | ${b}`.substring(0, 120);
+  }
+  if (payload.type === 'template') return payload.template?.name || '';
+  return '';
 }
 
 module.exports = { sendText, sendButtons, sendList, sendMenu, sendTemplate };
