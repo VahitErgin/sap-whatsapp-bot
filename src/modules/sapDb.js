@@ -392,8 +392,8 @@ async function getOnayBekleyenler({ dbName } = {}) {
 
   const query = `
     SELECT
-      d.DocEntry,
-      ISNULL(dr.DocNum, d.DocEntry)                    AS DocNum,
+      d.WddCode,
+      ISNULL(dr.DocNum, d.WddCode)                     AS DocNum,
       d.ObjType,
       CAST(ISNULL(dr.DocTotal, 0) AS DECIMAL(18,2))   AS DocTotal,
       ISNULL(dr.DocCur, 'TRY')                         AS ParaBirimi,
@@ -402,23 +402,58 @@ async function getOnayBekleyenler({ dbName } = {}) {
       CONVERT(VARCHAR(10), d.CreateDate, 23)           AS TalepTarihi,
       ISNULL(d.Remarks, '')                            AS Aciklama,
       w.UserID                                         AS OnaylayanKod,
+      w.StepCode                                       AS Stage,
       ISNULL(u.U_Name, w.UserID)                       AS OnaylayanAd,
       ISNULL(u.PortNum, '')                            AS OnaylayanTelefon,
       CASE d.ObjType
-        WHEN '22'         THEN 'Satın Alma Siparişi'
-        WHEN '20'         THEN 'Teslimat'
-        WHEN '17'         THEN 'Satış Faturası'
-        WHEN '18'         THEN 'İade Faturası'
-        WHEN '13'         THEN 'Fatura'
-        WHEN '1470000113' THEN 'Satış Siparişi'
+        WHEN '23'          THEN 'Satış Teklifi'
+        WHEN '17'          THEN 'Satış Siparişi'
+        WHEN '15'          THEN 'Teslimat'
+        WHEN '234000031'   THEN 'İade Talebi'
+        WHEN '16'          THEN 'İade'
+        WHEN '203'         THEN 'Müşteri Avans Ödemesi'
+        WHEN '13'          THEN 'Satış Faturası'
+        WHEN '165'         THEN 'Satış Düzeltme Faturası'
+        WHEN '166'         THEN 'Satış Düzeltme Faturası İptali'
+        WHEN '14'          THEN 'Satış Alacak Dekontu'
+        WHEN '132'         THEN 'Düzeltme Faturası'
+        WHEN '1470000113'  THEN 'Satın Alma Talebi'
+        WHEN '540000006'   THEN 'Satın Alma Teklifi'
+        WHEN '22'          THEN 'Satın Alma Siparişi'
+        WHEN '20'          THEN 'Mal Kabul'
+        WHEN '234000032'   THEN 'Mal İade Talebi'
+        WHEN '21'          THEN 'Mal İadesi'
+        WHEN '204'         THEN 'Tedarikçi Avans Ödemesi'
+        WHEN '18'          THEN 'Alış Faturası'
+        WHEN '163'         THEN 'Alış Düzeltme Faturası'
+        WHEN '164'         THEN 'Alış Düzeltme Faturası İptali'
+        WHEN '19'          THEN 'Alış Alacak Dekontu'
+        WHEN '59'          THEN 'Mal Girişi'
+        WHEN '60'          THEN 'Mal Çıkışı'
+        WHEN '1250000001'  THEN 'Stok Transfer Talebi'
+        WHEN '67'          THEN 'Stok Transferi'
+        WHEN '310000001'   THEN 'Stok Açılış Bakiyesi'
+        WHEN '46'          THEN 'Giden Ödeme'
+        WHEN '1250000026'  THEN 'Satış Çerçeve Sözleşmesi'
+        WHEN '1250000027'  THEN 'Satın Alma Çerçeve Sözleşmesi'
+        WHEN '1470000065'  THEN 'Stok Sayımı'
+        WHEN '10000071'    THEN 'Stok Deftere Nakli'
+        WHEN '112'         THEN 'Taslak Belge'
+        WHEN '140'         THEN 'Ödeme Taslağı'
+        WHEN '1470000109'  THEN 'Stok Sayımı Taslağı'
+        WHEN '1470000136'  THEN 'Stok Nakil Taslağı'
+        WHEN '1470000131'  THEN 'Stok Açılış Taslağı'
         ELSE 'Belge (' + d.ObjType + ')'
       END AS BelgeTipi
     FROM OWDD d WITH(NOLOCK)
-    INNER JOIN WDD1 w WITH(NOLOCK) ON d.DocEntry = w.WddCode
+    INNER JOIN WDD1 w WITH(NOLOCK) ON d.WddCode = w.WddCode
     LEFT  JOIN OUSR u WITH(NOLOCK) ON w.UserID   = u.USERID
     LEFT  JOIN ODRF dr WITH(NOLOCK) ON d.DraftEntry = dr.DocEntry
     WHERE d.Status = 'W'
       AND w.Status = 'W'
+      AND u.PortNum IS NOT NULL
+      AND u.PortNum <> ''
+      AND CAST(d.CreateDate AS DATE) >= CAST(GETDATE() AS DATE)
     ORDER BY d.CreateDate DESC
   `;
 

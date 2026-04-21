@@ -8,34 +8,38 @@
  * Akış:
  *   1. Kullanıcı "bekleyen onaylar" → açık sipariş listesi gelir (WhatsApp liste)
  *   2. Kullanıcı bir siparişi seçer → detay + Onayla/Reddet butonları gelir
- *   3. Kullanıcı butona basar → SAP'ta onay/red işlemi yapılır
+ *   3. Kullanıcı butona basar → SAP Service Layer ile onay/red yapılır
  *
  * Yetki:
- *   Sadece config.approverPhones listesindeki numaralar onay yapabilir.
+ *   Sadece approverService'te kayıtlı numaralar onay yapabilir.
  */
 
-const { getConnection }                    = require('./sapClient');
-const { sendText, sendButtons, sendList }  = require('../services/whatsappService'); // FIX: ../services/
-const { readApprovers }                    = require('../admin/approverService');
+const axios  = require('axios');
+const https  = require('https');
+const config = require('../config/config');
+
+const { sendText, sendButtons, sendList } = require('../services/whatsappService');
+const { readApprovers }                   = require('../admin/approverService');
+const { getOnayBekleyenler }              = require('./sapDb');
+const { getSession }                      = require('./sessionManager');
+
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 // ─────────────────────────────────────────────────────────────
 // 1. Bekleyen onayları listele veya belge detayı göster
 // ─────────────────────────────────────────────────────────────
 async function handleApproval({ from, docEntry }) {
-  // Yetki kontrolü
   if (!isApprover(from)) {
-    return await sendText(from,
+    return sendText(from,
       '🚫 Satın alma onayı için yetkiniz bulunmamaktadır.\nLütfen sistem yöneticinizle iletişime geçin.'
     );
   }
 
-  // Belge numarası verilmişse detay göster
   if (docEntry) {
-    return await showOrderDetail({ from, docEntry });
+    return showOrderDetail({ from, wddCode: docEntry });
   }
 
-  // Verilmemişse bekleyen onayları listele
-  return await listPendingOrders({ from });
+  return listPendingOrders({ from });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -43,34 +47,26 @@ async function handleApproval({ from, docEntry }) {
 // ─────────────────────────────────────────────────────────────
 async function listPendingOrders({ from }) {
   try {
-    const sl = getConnection();
-
-    const data = await sl.get('PurchaseOrders', {
-      '$filter': "DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'",
-      '$select': 'DocEntry,DocNum,CardName,DocTotal,DocDate,DocDueDate,Comments',
-      '$orderby': 'DocDate desc',
-      '$top': '10',
-    });
-
-    const orders = data?.value || [];
+    const phone10 = _normPhone(from);
+    const all     = await getOnayBekleyenler();
+    const orders  = all.filter(r => _normPhone(r.OnaylayanTelefon) === phone10);
 
     if (orders.length === 0) {
-      return await sendText(from, '✅ Onay bekleyen satın alma siparişi bulunmamaktadır.');
+      return sendText(from, '✅ Bugün bekleyen onayınız bulunmamaktadır.');
     }
 
-    // WhatsApp liste mesajı formatına çevir
-    const rows = orders.map(o => ({
-      id:          `DETAIL:${o.DocEntry}`,
-      title:       `#${o.DocNum} – ${_truncate(o.CardName, 20)}`,
-      description: `${_formatMoney(o.DocTotal)} | Vade: ${_formatDate(o.DocDueDate)}`,
+    const rows = orders.slice(0, 10).map(o => ({
+      id:          `ONAY_DETAIL:${o.WddCode}`,
+      title:       `#${o.DocNum} ${o.BelgeTipi}`.substring(0, 24),
+      description: `${_truncate(o.CardName || o.BelgeTipi, 30)} | ${_formatMoney(o.DocTotal)}`,
     }));
 
     await sendList(
       from,
       '📋 Bekleyen Onaylar',
-      `${orders.length} adet sipariş onay bekliyor.\nDetay için birini seçin:`,
-      'Siparişleri Gör',
-      [{ title: 'Satın Alma Siparişleri', rows }]
+      `Bugün ${orders.length} belge onay bekliyor:\nBir belge seçerek onayla veya reddet.`,
+      'Listele',
+      [{ title: 'Belgeler', rows }]
     );
 
   } catch (err) {
@@ -80,96 +76,117 @@ async function listPendingOrders({ from }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3. Sipariş detayını göster + Onayla/Reddet butonları
+// 3. Belge detayı + Onayla/Reddet butonları
 // ─────────────────────────────────────────────────────────────
-async function showOrderDetail({ from, docEntry }) {
+async function showOrderDetail({ from, wddCode }) {
   try {
-    const sl    = getConnection();
-    const order = await sl.getOne('PurchaseOrders', docEntry);
+    const phone10 = _normPhone(from);
+    const all     = await getOnayBekleyenler();
+    const order   = all.find(r =>
+      String(r.WddCode) === String(wddCode) &&
+      _normPhone(r.OnaylayanTelefon) === phone10
+    );
 
-    if (!order || order.error) {
-      return await sendText(from, `❌ ${docEntry} numaralı sipariş bulunamadı.`);
+    if (!order) {
+      return sendText(from, '⚠️ Onay kaydı bulunamadı veya bu belge size ait değil.');
     }
 
-    // Sipariş kalemlerini formatla (max 5 kalem)
-    const lines    = order.DocumentLines || [];
-    const lineText = lines.slice(0, 5).map((l, i) =>
-      `  ${i + 1}. ${l.ItemDescription || l.ItemCode} – ${l.Quantity} ${l.UnitOfMeasure || 'adet'} × ${_formatMoney(l.UnitPrice)}`
-    ).join('\n');
-    const moreLines = lines.length > 5 ? `\n  ...ve ${lines.length - 5} kalem daha` : '';
-
     const bodyText = [
-      `🏢 *Tedarikçi:* ${order.CardName}`,
-      `📅 *Tarih:* ${_formatDate(order.DocDate)}`,
-      `⏰ *Vade:* ${_formatDate(order.DocDueDate)}`,
-      `💰 *Toplam:* ${_formatMoney(order.DocTotal)} ${order.DocCurrency || 'TRY'}`,
-      order.Comments ? `📝 *Not:* ${_truncate(order.Comments, 80)}` : '',
-      '',
-      '*Kalemler:*',
-      lineText + moreLines,
+      order.CardName ? `🏢 *Muhatap:* ${order.CardName}` : '',
+      `📄 *Tür:* ${order.BelgeTipi}`,
+      `📅 *Tarih:* ${order.TalepTarihi}`,
+      `💰 *Tutar:* ${_formatMoney(order.DocTotal)} ${order.ParaBirimi}`,
+      order.Aciklama ? `📝 *Açıklama:* ${_truncate(order.Aciklama, 80)}` : '',
     ].filter(Boolean).join('\n');
 
     await sendButtons(
       from,
-      `Sipariş #${order.DocNum}`,
+      `Belge #${order.DocNum}`,
       bodyText,
       [
-        { id: `APPROVE:${docEntry}`, title: '✅ Onayla' },
-        { id: `REJECT:${docEntry}`,  title: '❌ Reddet' },
+        { id: `APPROVE:${wddCode}`, title: '✅ Onayla' },
+        { id: `REJECT:${wddCode}`,  title: '❌ Reddet' },
       ]
     );
 
   } catch (err) {
     console.error('[Approval] Detay hatası:', err.message);
-    await sendText(from, '⚠️ Sipariş detayı alınamadı. Lütfen tekrar deneyin.');
+    await sendText(from, '⚠️ Belge detayı alınamadı. Lütfen tekrar deneyin.');
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// 4. Onayla veya Reddet
+// 4. Onayla veya Reddet — SAP Service Layer
 // ─────────────────────────────────────────────────────────────
 async function confirmApproval({ from, docEntry, action }) {
-  // Yetki kontrolü
   if (!isApprover(from)) {
-    return await sendText(from,
-      '🚫 Onay/red yetkisine sahip değilsiniz.'
-    );
+    return sendText(from, '🚫 Onay/red yetkisine sahip değilsiniz.');
   }
 
   if (!docEntry) {
-    return await sendText(from,
-      '❓ Belge numarası belirtilmedi. Örnek: "456 numaralı siparişi onayla"'
-    );
+    return sendText(from, '❓ Belge numarası belirtilmedi.');
   }
 
   try {
-    const sl         = getConnection();
-    const actionName = action === 'approve' ? 'Approve' : 'Reject';
-    const result     = await sl.action('PurchaseOrders', docEntry, actionName);
+    const phone10  = _normPhone(from);
+    const all      = await getOnayBekleyenler();
+    const onayRow  = all.find(r =>
+      String(r.WddCode) === String(docEntry) &&
+      _normPhone(r.OnaylayanTelefon) === phone10
+    );
 
-    if (result?.success) {
-      const emoji = action === 'approve' ? '✅' : '❌';
-      const verb  = action === 'approve' ? 'onaylandı' : 'reddedildi';
-
-      // Sipariş bilgisini al (bildirim için)
-      let orderInfo = '';
-      try {
-        const order = await sl.getOne('PurchaseOrders', docEntry);
-        orderInfo = ` (${order.CardName} – ${_formatMoney(order.DocTotal)})`;
-      } catch { /* bilgi alınamazsa boş geç */ }
-
-      await sendText(from,
-        `${emoji} *Sipariş #${docEntry}* başarıyla *${verb}*!${orderInfo}\n\n` +
-        `📅 İşlem zamanı: ${_formatDateTime(new Date())}`
-      );
-    } else {
-      throw new Error('SAP işlem başarısız döndü');
+    if (!onayRow) {
+      return sendText(from, '⚠️ Onay kaydı bulunamadı veya bu belge size ait değil.');
     }
 
-  } catch (err) {
-    console.error(`[Approval] ${action} hatası (${docEntry}):`, err.message);
+    const session   = getSession(from);
+    const b1session = session?.b1session;
+    if (!b1session) {
+      return sendText(from,
+        '🔐 Onay işlemi için SAP oturumunuz gerekiyor.\n*giriş yap* yazarak tekrar giriş yapın.'
+      );
+    }
+
+    // SAP SL: PATCH /ApprovalRequests({WddCode})
+    // ApprovalRequestLines → onaylayan kullanıcının satırını güncelle
+    const baseUrl   = config.sap.serviceLayerUrl.replace(/\/$/, '');
+    const slStatus  = action === 'approve' ? 'ardApproved' : 'ardNotApproved';
+    const remarks   = action === 'approve'
+      ? 'WhatsApp üzerinden onaylandı'
+      : 'WhatsApp üzerinden reddedildi';
+
+    console.log(`[Approval] PATCH ApprovalRequests(${onayRow.WddCode}) | Status:${slStatus}`);
+
+    await axios.patch(
+      `${baseUrl}/ApprovalRequests(${onayRow.WddCode})`,
+      {
+        ApprovalRequestDecisions: [
+          {
+            Status:  slStatus,
+            Remarks: remarks,
+          },
+        ],
+      },
+      {
+        headers:    { Cookie: `B1SESSION=${b1session}`, 'Content-Type': 'application/json' },
+        httpsAgent,
+        timeout:    15000,
+      }
+    );
+
+    const emoji = action === 'approve' ? '✅' : '❌';
+    const verb  = action === 'approve' ? 'onaylandı' : 'reddedildi';
     await sendText(from,
-      `⚠️ İşlem gerçekleştirilemedi: ${err.message}\n\nLütfen SAP üzerinden manuel kontrol edin.`
+      `${emoji} *${onayRow.BelgeTipi} #${onayRow.DocNum}* başarıyla *${verb}*!\n\n` +
+      `📅 ${_formatDateTime(new Date())}`
+    );
+
+  } catch (err) {
+    const sapErr = err.response?.data?.error?.message || err.message;
+    console.error(`[Approval] ${action} hatası (${docEntry}):`, sapErr);
+    console.error(`[Approval] SAP detay:`, JSON.stringify(err.response?.data || {}).substring(0, 400));
+    await sendText(from,
+      `⚠️ İşlem gerçekleştirilemedi: ${sapErr}\n\nLütfen SAP üzerinden manuel kontrol edin.`
     );
   }
 }
@@ -182,18 +199,16 @@ function isApprover(phoneNumber) {
   return readApprovers().some(a => a.phone === phoneNumber);
 }
 
+function _normPhone(raw) {
+  return String(raw || '').replace(/\D/g, '').slice(-10);
+}
+
 function _formatMoney(amount) {
   if (amount == null) return '—';
   return Number(amount).toLocaleString('tr-TR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function _formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 function _formatDateTime(date) {
@@ -208,4 +223,4 @@ function _truncate(str, len) {
   return str.length > len ? str.substring(0, len) + '…' : str;
 }
 
-module.exports = { handleApproval, confirmApproval };
+module.exports = { handleApproval, confirmApproval, showOrderDetail };
