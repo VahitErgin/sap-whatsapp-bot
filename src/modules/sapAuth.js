@@ -23,14 +23,18 @@ async function loginUser(userCode, password, dbName) {
   const db      = dbName || config.sap.companyDb;
 
   try {
-    await axios.post(
+    const res = await axios.post(
       `${baseUrl}/Login`,
       { CompanyDB: db, UserName: userCode, Password: password },
       { httpsAgent, timeout: 10000 }
     );
-    // Login başarılı → employee ID'yi MSSQL'den al
+    // B1SESSION cookie'yi al
+    const setCookie = res.headers['set-cookie'] || [];
+    const b1Cookie  = setCookie.find(c => c.startsWith('B1SESSION'));
+    const b1session = b1Cookie ? b1Cookie.split(';')[0].replace('B1SESSION=', '') : null;
+
     const employeeId = await _getEmployeeId(userCode, db);
-    return { success: true, employeeId };
+    return { success: true, employeeId, b1session };
   } catch (err) {
     const status = err.response?.status;
     if (status === 401 || status === 400) {

@@ -63,8 +63,8 @@ async function sendApprovalNotification(phone, row) {
   ].filter(Boolean).join('\n');
 
   await sendButtons(phone, header, body, [
-    { id: `APPROVE:${row.DocEntry}`, title: '✅ Onayla' },
-    { id: `REJECT:${row.DocEntry}`,  title: '❌ Reddet' },
+    { id: `APPROVE:${row.WddCode}`, title: '✅ Onayla' },
+    { id: `REJECT:${row.WddCode}`,  title: '❌ Reddet' },
   ]);
 }
 
@@ -85,7 +85,7 @@ async function checkOnaylar() {
 
     for (const row of rows) {
       // Her belge+onaylayan çifti için ayrı state key (aynı belge farklı kişilere gidebilir)
-      const key = `${row.DocEntry}_${row.OnaylayanKod}`;
+      const key = `${row.WddCode}_${row.OnaylayanKod}`;
       newState[key] = { docNum: row.DocNum, belgeTipi: row.BelgeTipi, notifiedAt: state[key]?.notifiedAt || null };
 
       if (state[key]?.notifiedAt) continue;

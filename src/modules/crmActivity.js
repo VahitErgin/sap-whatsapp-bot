@@ -338,11 +338,13 @@ async function _sendTypeList(from, cardName) {
 async function _sendCategoryList(from, actTypes) {
   const rows = [
     { id: 'ACT_CAT:skip', title: '— Atla —', description: 'Tür seçmeden devam et' },
-    ...actTypes.slice(0, 9).map(t => ({
-      id:          `ACT_CAT:${t.Code}`,
-      title:       t.Name,
-      description: t.Code,
-    })),
+    ...actTypes
+      .filter(t => t.Name && String(t.Name).trim())
+      .slice(0, 9).map(t => ({
+        id:          `ACT_CAT:${t.Code}`,
+        title:       String(t.Name).substring(0, 24),
+        description: String(t.Code),
+      })),
   ];
   await sendList(from, '🗂 Tür Seçin', 'Aktivite türünü seçin:', 'Tür Seç', [{ title: 'Türler', rows }]);
 }
@@ -350,11 +352,13 @@ async function _sendCategoryList(from, actTypes) {
 async function _sendSubjectList(from, subjects) {
   const rows = [
     { id: 'ACT_SUB:skip', title: '— Atla —', description: 'Konu seçmeden devam et' },
-    ...subjects.slice(0, 9).map(s => ({
-      id:          `ACT_SUB:${s.Code}`,
-      title:       s.Name,
-      description: String(s.Code),
-    })),
+    ...subjects
+      .filter(s => s.Name && String(s.Name).trim())
+      .slice(0, 9).map(s => ({
+        id:          `ACT_SUB:${s.Code}`,
+        title:       String(s.Name).substring(0, 24),
+        description: String(s.Code),
+      })),
   ];
   await sendList(from, '📌 Konu Seçin', 'Aktivite konusunu seçin:', 'Konu Seç', [{ title: 'Konular', rows }]);
 }
