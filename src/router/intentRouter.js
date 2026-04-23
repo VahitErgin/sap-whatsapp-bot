@@ -27,7 +27,7 @@ const {
   handleCreateActivity, handleWizardInput,
   handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
   handleWizardFirmSelection,
-  getWizardState, confirmActivity,
+  getWizardState, confirmActivity, skipLocation,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
 } = require('../modules/crmActivity');
 
@@ -99,10 +99,11 @@ async function handleIncoming({ from, text }) {
       const wddCode = text.slice('ONAY_DETAIL:'.length).trim();
       return await approval.showOrderDetail({ from, wddCode });
     }
-    if (upper === 'ACT_SAVE')    return await confirmActivity(from);
-    if (upper === 'LEAD_SAVE')   return await confirmLead(from);
-    if (upper === 'LEAD_CANCEL') return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.');
-    if (upper === 'ACT_CANCEL')  return await sendText(from, '🚫 Aktivite iptal edildi.');
+    if (upper === 'ACT_SAVE')      return await confirmActivity(from);
+    if (upper === 'ACT_LOC:SKIP')  return await skipLocation(from);
+    if (upper === 'LEAD_SAVE')     return await confirmLead(from);
+    if (upper === 'LEAD_CANCEL')   return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.');
+    if (upper === 'ACT_CANCEL')    return await sendText(from, '🚫 Aktivite iptal edildi.');
     if (text.startsWith('ACT_FIRM:')) {
       const payload  = text.slice('ACT_FIRM:'.length);
       const sepIdx   = payload.indexOf('|');

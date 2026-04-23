@@ -163,11 +163,11 @@ async function handleWizardInput(from, text) {
     state.notes = text.trim();
     await _askLocation(from, state);
   } else if (state.step === 'location') {
-    // Kullanıcı metin yazdı, konum bekleniyor — hatırlat
-    await sendText(from,
-      `📍 Lütfen konumunuzu paylaşın.\n\n` +
-      `WhatsApp'ta *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\n` +
-      `_Aktivite, konum alınmadan tamamlanamaz._`
+    // Kullanıcı metin yazdı, buton hatırlat
+    await sendButtons(from,
+      '📍 Konum Bekleniyor',
+      `Lütfen *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\nMobil cihazdan erişemiyorsanız atlayabilirsiniz.`,
+      [{ id: 'ACT_LOC:skip', title: '📍 Konumu Atla' }]
     );
   }
 }
@@ -188,6 +188,14 @@ async function handleWizardLocation(from, location) {
   _wizard.delete(_norm(from));
   await _showSummary(from, state);
   return true;
+}
+
+async function skipLocation(from) {
+  const state = getWizardState(from);
+  if (!state || state.step !== 'location') return;
+  state.location = null;
+  _wizard.delete(_norm(from));
+  await _showSummary(from, state);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -364,13 +372,13 @@ async function _sendSubjectList(from, subjects) {
 }
 
 async function _askLocation(from, state) {
-  // Her aktivitede taze konum zorunlu — session'daki eski konum kullanılmaz
   state.step = 'location';
   _wizard.set(_norm(from), state);
-  await sendText(from,
-    `📍 *Mevcut konumunuzu paylaşın*\n\n` +
+  await sendButtons(from,
+    '📍 Konum Paylaşın',
     `WhatsApp'ta *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\n` +
-    `_Aktivite, konum alınmadan tamamlanamaz._`
+    `_Mobil cihazdan erişemiyorsanız atlayabilirsiniz._`,
+    [{ id: 'ACT_LOC:skip', title: '📍 Konumu Atla' }]
   );
 }
 
@@ -603,6 +611,7 @@ module.exports = {
   handleWizardFirmSelection,
   getWizardState,
   handleWizardLocation,
+  skipLocation,
   confirmActivity,
   getActivityTypes,
   getActivitySubjects,
