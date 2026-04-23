@@ -18,13 +18,9 @@ function _filePath(date) {
 }
 
 function writeLog(entry) {
-  try {
-    _ensureDir();
-    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n';
-    fs.appendFileSync(_filePath(), line, 'utf8');
-  } catch {
-    // loglama hatası uygulamayı durdurmamalı
-  }
+  _ensureDir();
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n';
+  fs.appendFile(_filePath(), line, 'utf8', () => {}); // async, hata sessizce yutulur
 }
 
 function readLogs(fromDate, toDate) {
