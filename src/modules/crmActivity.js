@@ -17,7 +17,6 @@ const config = require('../config/config');
 const { getConnection }  = require('./sapClient');
 const { resolveCardCode } = require('./sapDb');
 const { sendText, sendButtons, sendList } = require('../services/whatsappService');
-const { getLocation } = require('./sessionManager');
 
 // ── Wizard durumu ─────────────────────────────────────────────
 const _wizard    = new Map();
@@ -361,18 +360,11 @@ async function _sendSubjectList(from, subjects) {
 }
 
 async function _askLocation(from, state) {
-  // Session'da zaten konum varsa direkt özete geç
-  const existing = getLocation(from);
-  if (existing) {
-    state.location = existing;
-    _wizard.delete(_norm(from));
-    return _showSummary(from, state);
-  }
-  // Yoksa kullanıcıdan iste
+  // Her aktivitede taze konum zorunlu — session'daki eski konum kullanılmaz
   state.step = 'location';
   _wizard.set(_norm(from), state);
   await sendText(from,
-    `📍 *Konumunuzu paylaşın*\n\n` +
+    `📍 *Mevcut konumunuzu paylaşın*\n\n` +
     `WhatsApp'ta *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\n` +
     `_Aktivite, konum alınmadan tamamlanamaz._`
   );
