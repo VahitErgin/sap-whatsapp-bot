@@ -16,15 +16,19 @@
 const config = require('../config/config');
 const { getConnection }  = require('./sapClient');
 const { resolveCardCode } = require('./sapDb');
-const { sendText, sendButtons, sendList } = require('../services/whatsappService');
+const { sendText, sendButtons, sendList, downloadMedia } = require('../services/whatsappService');
 
 // ── Wizard durumu ─────────────────────────────────────────────
 const _wizard    = new Map();
 const WIZARD_TTL = 10 * 60 * 1000;
 
 // ── Onay bekleme ──────────────────────────────────────────────
-const _pendingActivity = new Map();
-const PENDING_TTL      = 5 * 60 * 1000;
+const _pendingActivity   = new Map();
+const PENDING_TTL        = 5 * 60 * 1000;
+
+// ── Dosya ekleme bekleme ──────────────────────────────────────
+const _pendingAttachment = new Map();
+const ATTACH_TTL         = 5 * 60 * 1000;
 
 // Aktivite tipi listesi (Activity enum)
 const ALL_TYPES = [
@@ -199,6 +203,55 @@ async function skipLocation(from) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// handleMediaAttachment — image/document mesajı geldiğinde çağrılır
+// ─────────────────────────────────────────────────────────────
+async function handleMediaAttachment(from, mediaId, mimeType, fileName) {
+  const pending = _pendingAttachment.get(_norm(from));
+  if (!pending || pending.expiresAt < Date.now()) {
+    _pendingAttachment.delete(_norm(from));
+    return false;
+  }
+
+  const maxMb = parseInt(process.env.ATTACHMENT_MAX_MB || '5', 10);
+
+  try {
+    await sendText(from, '⏳ Dosya indiriliyor...');
+    const { buffer, fileSize } = await downloadMedia(mediaId);
+
+    if (fileSize && fileSize > maxMb * 1024 * 1024) {
+      await sendText(from,
+        `⚠️ Dosya boyutu ${maxMb} MB sınırını aşıyor ` +
+        `(${(fileSize / 1024 / 1024).toFixed(1)} MB).\n` +
+        `Lütfen daha küçük bir dosya gönderin.`
+      );
+      return true;
+    }
+
+    await sendText(from, '⏳ SAP\'a yükleniyor...');
+    const sl       = getConnection(pending.dbName || config.sap.companyDb);
+    const uploaded = await sl.postForm('Attachments2', buffer, fileName, mimeType);
+    const absEntry = uploaded?.AbsEntry;
+
+    if (!absEntry) throw new Error('SAP\'tan AbsEntry alınamadı');
+
+    await sl.patch('Activities', pending.docEntry, { AttachmentEntry: absEntry });
+
+    _pendingAttachment.delete(_norm(from));
+    await sendText(from, `✅ *Dosya eklendi!*\n📎 ${fileName}`);
+
+  } catch (err) {
+    console.error('[CRM] Dosya ekleme hatası:', err.message);
+    await sendText(from, `⚠️ Dosya eklenemedi: ${err.message}`);
+  }
+
+  return true;
+}
+
+function cancelAttachment(from) {
+  _pendingAttachment.delete(_norm(from));
+}
+
+// ─────────────────────────────────────────────────────────────
 // handleWizardFirmSelection — ACT_FIRM:CardCode|CardName
 // ─────────────────────────────────────────────────────────────
 async function handleWizardFirmSelection(from, cardCode, cardName) {
@@ -301,15 +354,29 @@ async function confirmActivity(from) {
     if (activityData.subjectCode)  payload.ActivitySubject  = Number(activityData.subjectCode);
     if (activityData.employeeId)   payload.HandledBy        = activityData.employeeId;
 
-    await sl.post('Activities', payload);
+    const saved    = await sl.post('Activities', payload);
+    const docEntry = saved?.DocEntry;
+    console.log(`[CRM] Aktivite: ${activityData.userName} → ${activityData.cardName || '—'} (DocEntry: ${docEntry})`);
 
-    await sendText(from,
-      `✅ *Aktivite kaydedildi!*\n\n` +
-      `🏢 ${activityData.cardName || '—'}\n` +
-      `📋 ${activityData.action} · ${activityData.activityDate}\n` +
-      `📝 ${activityData.notes}`
-    );
-    console.log(`[CRM] Aktivite: ${activityData.userName} → ${activityData.cardName || '—'}`);
+    const summary = [
+      `🏢 ${activityData.cardName || '—'}`,
+      `📋 ${activityData.action} · ${activityData.activityDate}`,
+      activityData.notes ? `📝 ${activityData.notes}` : '',
+      loc ? `📍 ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}` : '',
+    ].filter(Boolean).join('\n');
+
+    if (docEntry) {
+      _pendingAttachment.set(_norm(from), {
+        docEntry,
+        dbName:    dbName || config.sap.companyDb,
+        expiresAt: Date.now() + ATTACH_TTL,
+      });
+    }
+
+    await sendButtons(from, '✅ Aktivite kaydedildi!', summary, [
+      { id: 'ACT_ATTACH', title: '📎 Dosya Ekle' },
+      { id: 'ACT_DONE',   title: '✓ Tamam'       },
+    ]);
 
   } catch (err) {
     console.error('[CRM] Kayıt hatası:', err.message);
@@ -612,6 +679,8 @@ module.exports = {
   getWizardState,
   handleWizardLocation,
   skipLocation,
+  handleMediaAttachment,
+  cancelAttachment,
   confirmActivity,
   getActivityTypes,
   getActivitySubjects,

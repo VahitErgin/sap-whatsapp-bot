@@ -24,6 +24,7 @@ const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
 const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz } = require('./sapDb');
 const { sendText, sendList }         = require('../services/whatsappService');
+const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
 // ─── Dokümanları oku ──────────────────────────────────────────
@@ -192,7 +193,7 @@ const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
-async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null, customerCardCode = null }) {
+async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null, customerCardCode = null, lang = 'tr' }) {
   if (!question || question.trim() === '') {
     return await sendText(from,
       '📊 *SAP Sorgulama*\n\nNe öğrenmek istersiniz?\n\nÖrnek:\n• _"C001 carisinin bakiyesi"_\n• _"Bu hafta vadesi gelen ödemeler"_\n• _"Stokta azalan ürünler"_'
@@ -204,9 +205,13 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
 
   try {
     // 1. Claude'a sor: hangi SAP sorgusunu çalıştıralım?
-    const planQuestion = licenseRestriction
-      ? `[LİSANS KISITLAMASI: ${licenseRestriction}]\n\n${question}`
-      : question;
+    const { langInstruction } = require('../services/i18n');
+    const langNote     = langInstruction(lang);
+    const planQuestion = [
+      licenseRestriction ? `[LİSANS KISITLAMASI: ${licenseRestriction}]` : '',
+      langNote           ? `[YANIT DİLİ: ${langNote}]` : '',
+      question,
+    ].filter(Boolean).join('\n\n');
     const plan = await buildQueryPlan(planQuestion);
 
     // Müşteri kullanıcıysa tüm sorguları kendi CardCode'una kilitle
@@ -576,6 +581,10 @@ async function executeQueries(sl, queries, dbName) {
           const res = await sl._http.patch(q.endpoint, q.body || {}, { headers: sl._cookieHeader() });
           data = [{ success: true, status: res.status }];
         } else {
+          // Pazarlama belgelerinde NumAtCard'ı otomatik ekle (e-belge linki için)
+          if (_edocTypeForEndpoint(q.endpoint) && q.params?.['$select'] && !q.params['$select'].includes('NumAtCard')) {
+            q.params['$select'] += ',NumAtCard';
+          }
           const res = await sl.get(q.endpoint, q.params || {});
           data = res?.value || res || [];
         }
@@ -721,9 +730,16 @@ function formatResultsLocal(_question, queries, results) {
       } else {
         sec.push(`📋 *${r.description}* (${r.count} kayıt)\n`);
         let totalDoc = 0;
+        const edocType = _edocTypeForEndpoint(ep);
         data.slice(0, 10).forEach(row => {
           const line = _fmtODataRow(row);
-          if (line) sec.push(`• ${line}`);
+          if (!line) return;
+          let rowText = `• ${line}`;
+          if (edocType && row.NumAtCard) {
+            const url = buildEdocUrl(edocType, row.NumAtCard);
+            if (url) rowText += `\n  📄 ${url}`;
+          }
+          sec.push(rowText);
           totalDoc += parseFloat(row.DocTotal || 0);
         });
         if (data.length > 10) sec.push(`_... ve ${data.length - 10} kayıt daha_`);
@@ -735,6 +751,15 @@ function formatResultsLocal(_question, queries, results) {
   }
 
   return parts.join('\n\n') || '📭 Sonuç bulunamadı.';
+}
+
+function _edocTypeForEndpoint(endpoint) {
+  if (!endpoint) return null;
+  if (/^Invoices$/i.test(endpoint))      return 'efatura';   // OINV → efatura (yoksa earsiv fallback)
+  if (/DeliveryNote/i.test(endpoint))    return 'eirsaliye'; // ODLN
+  if (/^Returns$/i.test(endpoint))       return 'earsiv';    // ORDN
+  if (/^CreditNote/i.test(endpoint))     return 'earsiv';    // ORIN
+  return null;
 }
 
 function _fmtODataRow(row) {

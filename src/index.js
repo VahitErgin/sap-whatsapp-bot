@@ -127,6 +127,36 @@ app.post('/webhook', async (req, res) => {
       return;
     }
 
+    // ── Görsel / Belge (aktiviteye dosya ekleme) ──────────────
+    if (msgType === 'image' || msgType === 'document') {
+      const media   = message[msgType];
+      const mediaId = media?.id;
+      if (!mediaId) return;
+
+      const mimeType = media.mime_type || 'application/octet-stream';
+      const fileName = msgType === 'document'
+        ? (media.filename || `dosya.${_mimeExt(mimeType)}`)
+        : `gorsel.${_mimeExt(mimeType)}`;
+
+      const { writeLog } = require('./services/logService');
+      const { handleMediaAttachment } = require('./modules/crmActivity');
+      writeLog({ phone: from, dir: 'in', type: msgType, text: fileName });
+      console.log(`[Medya] ${from}: [${msgType}] ${fileName}`);
+
+      try {
+        const handled = await handleMediaAttachment(from, mediaId, mimeType, fileName);
+        if (!handled) {
+          await sendText(from,
+            '📎 Dosya eklemek için önce bir aktivite oluşturun ve *Dosya Ekle* seçeneğini seçin.'
+          );
+        }
+      } catch (err) {
+        console.error(`[Medya] Hata (${from}):`, err.message);
+        await sendText(from, `⚠️ Dosya işlenemedi: ${err.message}`);
+      }
+      return;
+    }
+
     // ── Metin ve buton cevapları ───────────────────────────────
     if (msgType !== 'text' && msgType !== 'interactive') return;
 
@@ -157,6 +187,18 @@ app.post('/webhook', async (req, res) => {
 // Sağlık kontrolü
 // ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
+
+function _mimeExt(mimeType) {
+  const map = {
+    'image/jpeg':  'jpg',  'image/png':  'png',  'image/webp': 'webp', 'image/gif': 'gif',
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-excel': 'xls',
+  };
+  return map[mimeType] || 'bin';
+}
 
 app.listen(config.port, () => {
   console.log(`[Sunucu] http://localhost:${config.port} üzerinde çalışıyor`);

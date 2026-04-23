@@ -119,4 +119,28 @@ function _preview(payload) {
   return '';
 }
 
-module.exports = { sendText, sendButtons, sendList, sendMenu, sendTemplate };
+// ─────────────────────────────────────────────────────────────
+// Meta'dan medya (görsel/belge) indir
+// ─────────────────────────────────────────────────────────────
+async function downloadMedia(mediaId) {
+  // 1. URL'yi al
+  const infoRes = await axios.get(
+    `${config.whatsapp.apiUrl}/${mediaId}`,
+    { headers: { Authorization: `Bearer ${config.whatsapp.accessToken}` } }
+  );
+  const { url, mime_type, file_size } = infoRes.data;
+
+  // 2. Binary indir
+  const fileRes = await axios.get(url, {
+    headers:      { Authorization: `Bearer ${config.whatsapp.accessToken}` },
+    responseType: 'arraybuffer',
+  });
+
+  return {
+    buffer:   Buffer.from(fileRes.data),
+    mimeType: mime_type,
+    fileSize: file_size || fileRes.data.byteLength,
+  };
+}
+
+module.exports = { sendText, sendButtons, sendList, sendMenu, sendTemplate, downloadMedia };

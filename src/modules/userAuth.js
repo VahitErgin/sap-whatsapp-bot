@@ -3,6 +3,19 @@
 const { getUserByPhone, getCustomerByPhone } = require('./sapDb');
 const { getConnection }  = require('./sapClient');
 const config             = require('../config/config');
+const { getExplicitLang } = require('../services/langService');
+
+// SAP B1 Language (integer) → bot dil kodu
+const SAP_LANG_MAP = {
+  5:  'en',  // English
+  6:  'en',  // English (UK)
+  14: 'tr',  // Turkish
+  2:  'ar',  // Arabic
+  25: 'ar',  // Arabic (Modern Standard)
+};
+function _sapLang(code) {
+  return SAP_LANG_MAP[Number(code)] || null;
+}
 
 // SAP B1 lisans tipi → bot erişim konfigürasyonu
 const LICENSE_CONFIG = {
@@ -79,10 +92,11 @@ async function resolveUser(phone, dbName) {
       customerCardCode:    null,
       allowedIntents:      licCfg.allowedIntents,
       cashflowRestriction: licCfg.cashflowRestriction,
+      lang:                getExplicitLang(phone10) ?? _sapLang(ousr.Language) ?? 'tr',
     };
 
     _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
-    console.log(`[UserAuth] ${phone10} → ${user.userCode} (${license})`);
+    console.log(`[UserAuth] ${phone10} → ${user.userCode} (${license}) lang=${user.lang}`);
     return user;
   }
 
@@ -97,10 +111,11 @@ async function resolveUser(phone, dbName) {
       customerCardCode:    ocpr.CardCode,
       allowedIntents:      ['cashflow', 'support', 'help'],
       cashflowRestriction: null,
+      lang:                getExplicitLang(phone10) ?? 'tr',
     };
 
     _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
-    console.log(`[UserAuth] ${phone10} → Müşteri ${ocpr.CardCode} (${ocpr.CardName})`);
+    console.log(`[UserAuth] ${phone10} → Müşteri ${ocpr.CardCode} (${ocpr.CardName}) lang=${user.lang}`);
     return user;
   }
 

@@ -24,6 +24,8 @@
       <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a href="/admin/approvers" class="nav-link"><i class="bi bi-people"></i> Onay Yetkilileri</a>
       <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/tasks"     class="nav-link"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/logs"      class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
       <a href="/admin/settings"  class="nav-link active"><i class="bi bi-gear"></i> Ayarlar</a>
     </nav>
     <div class="sidebar-footer">
@@ -36,7 +38,7 @@
   <!-- İçerik -->
   <div id="content">
     <div class="page-header">
-      <h4><i class="bi bi-gear me-2" style="color:#6cb2eb"></i>Ayarlar</h4>
+      <h4><i class="bi bi-gear me-2" style="color:#6cb2eb"></i><span data-i18n="page_settings">Ayarlar</span></h4>
     </div>
 
     <div id="saveAlert" class="alert py-2 d-none mb-3"></div>
@@ -46,37 +48,53 @@
       <!-- SAP Bağlantı -->
       <div class="col-12">
         <div class="card">
-          <div class="card-header"><i class="bi bi-database me-2"></i>SAP Service Layer Bağlantısı</div>
+          <div class="card-header"><i class="bi bi-database me-2"></i><span data-i18n="card_sap">SAP Service Layer Bağlantısı</span></div>
           <div class="card-body">
             <div class="row g-3 mb-3">
-              <div class="col-md-4">
-                <div class="small text-muted mb-1">URL</div>
-                <div class="fw-semibold" id="sapUrl">—</div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold small">Service Layer URL</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="slUrl"
+                  placeholder="https://SAP-SERVER:50000/b1s/v2/">
               </div>
-              <div class="col-md-2">
-                <div class="small text-muted mb-1">Varsayılan DB</div>
-                <div class="fw-semibold" id="sapDb">—</div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">Varsayılan Şirket DB</label>
+                <input type="text" class="form-control form-control-sm" id="slCompanyDb"
+                  placeholder="TestEndeks011225">
               </div>
-              <div class="col-md-2">
-                <div class="small text-muted mb-1">Kullanıcı</div>
-                <div class="fw-semibold">manager</div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">Çoklu DB <span class="text-muted fw-normal">(noktalı virgülle)</span></label>
+                <input type="text" class="form-control form-control-sm" id="slDatabases"
+                  placeholder="DB1;DB2;DB3">
               </div>
-              <div class="col-md-4">
-                <div class="small text-muted mb-1">Tanımlı DB Listesi</div>
-                <div id="sapDbs">—</div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">SAP Kullanıcı Adı</label>
+                <input type="text" class="form-control form-control-sm" id="slUsername"
+                  placeholder="manager">
               </div>
-            </div>
-            <div class="d-flex align-items-center gap-3">
-              <div>
-                <label class="form-label fw-semibold small mb-1">Test Edilecek DB</label>
-                <select class="form-select form-select-sm" id="testDbSelect" style="width:200px"></select>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold small">
+                  SAP Şifre <span class="text-muted fw-normal">(boş bırakırsan değişmez)</span>
+                </label>
+                <div class="input-group input-group-sm">
+                  <input type="password" class="form-control" id="slPassword" placeholder="••••••••">
+                  <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('slPassword',this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+                <div class="form-text" id="slPasswordStatus"></div>
               </div>
-              <div class="mt-3">
-                <button class="btn btn-primary btn-sm" onclick="testSap()" id="testBtn">
-                  <i class="bi bi-play-circle me-1"></i>Bağlantıyı Test Et
+              <div class="col-12 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-primary btn-sm" onclick="saveSlSettings()">
+                  <i class="bi bi-floppy me-1"></i>SAP SL Ayarlarını Kaydet
                 </button>
+                <div class="vr mx-1"></div>
+                <label class="form-label fw-semibold small mb-0">Test DB:</label>
+                <select class="form-select form-select-sm" id="testDbSelect" style="width:180px"></select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="testSap()" id="testBtn">
+                  <i class="bi bi-play-circle me-1"></i>Test Et
+                </button>
+                <span id="testResult"></span>
               </div>
-              <div class="mt-3" id="testResult"></div>
             </div>
           </div>
         </div>
@@ -85,7 +103,7 @@
       <!-- WhatsApp API -->
       <div class="col-12">
         <div class="card">
-          <div class="card-header"><i class="bi bi-whatsapp me-2" style="color:#25d366"></i>WhatsApp Business API</div>
+          <div class="card-header"><i class="bi bi-whatsapp me-2" style="color:#25d366"></i><span data-i18n="card_wa">WhatsApp Business API</span></div>
           <div class="card-body">
             <div class="row g-3">
               <div class="col-md-4">
@@ -122,7 +140,7 @@
       <!-- SQL Veritabanı -->
       <div class="col-12">
         <div class="card">
-          <div class="card-header"><i class="bi bi-server me-2"></i>SAP SQL Veritabanı (Direkt Bağlantı)</div>
+          <div class="card-header"><i class="bi bi-server me-2"></i><span data-i18n="card_sql">SAP SQL Veritabanı (Direkt Bağlantı)</span></div>
           <div class="card-body">
             <div class="row g-3">
               <div class="col-md-4">
@@ -167,7 +185,7 @@
       <!-- Anthropic API -->
       <div class="col-md-6">
         <div class="card h-100">
-          <div class="card-header"><i class="bi bi-cpu me-2"></i>Claude AI (Anthropic)</div>
+          <div class="card-header"><i class="bi bi-cpu me-2"></i><span data-i18n="card_ai">Claude AI (Anthropic)</span></div>
           <div class="card-body">
             <div class="mb-3">
               <label class="form-label fw-semibold small">
@@ -189,16 +207,47 @@
         </div>
       </div>
 
+      <!-- OpenAI API (Whisper sesli mesaj) -->
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header"><i class="bi bi-mic me-2"></i>OpenAI (Whisper Sesli Mesaj)</div>
+          <div class="card-body">
+            <div class="mb-2 text-muted small">Sesli mesajları metne çevirmek için kullanılır. Yoksa sesli mesajlar işlenmez.</div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold small">
+                API Key
+                <span class="text-muted fw-normal">(boş bırakırsan değişmez)</span>
+              </label>
+              <div class="input-group input-group-sm">
+                <input type="password" class="form-control" id="openaiKey" placeholder="sk-proj-...">
+                <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('openaiKey',this)">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+              <div class="form-text" id="openaiKeyStatus"></div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveOpenaiKey()">
+              <i class="bi bi-floppy me-1"></i>API Key Kaydet
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- CRM & Oturum Ayarları -->
       <div class="col-12">
         <div class="card">
-          <div class="card-header"><i class="bi bi-people me-2" style="color:#6cb2eb"></i>CRM & Oturum Ayarları</div>
+          <div class="card-header"><i class="bi bi-people me-2" style="color:#6cb2eb"></i><span data-i18n="card_crm">CRM & Oturum Ayarları</span></div>
           <div class="card-body">
             <div class="row g-3">
-              <div class="col-md-3">
-                <label class="form-label fw-semibold small">Oturum Süresi (dakika)</label>
+              <div class="col-md-2">
+                <label class="form-label fw-semibold small" data-i18n="lbl_session_timeout">Oturum Süresi (dakika)</label>
                 <input type="number" class="form-control form-control-sm" id="sessionTimeout" min="30" max="1440" placeholder="480">
                 <div class="form-text">Varsayılan: 480 dk (8 saat)</div>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label fw-semibold small" data-i18n="lbl_attach_mb">Maks. Dosya Boyutu (MB)</label>
+                <input type="number" class="form-control form-control-sm" id="attachMaxMb" min="1" max="50" placeholder="5">
+                <div class="form-text">Aktiviteye eklenecek dosya limiti</div>
               </div>
               <div class="col-md-9">
                 <label class="form-label fw-semibold small">Aktif Aktivite Tipleri</label>
@@ -221,22 +270,114 @@
         </div>
       </div>
 
+      <!-- E-Belge Entegrasyonu -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:#6cb2eb"></i><span data-i18n="card_edoc">E-Belge Entegrasyonu</span></div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Entegratörünüzün görüntüleme URL'lerini girin. <code>{0}</code> yerine belgedeki <strong>NumAtCard</strong> (fatura numarası) alanı otomatik yerleştirilir.<br>
+              Örnek: <code>https://portal.example.com/doc/{0}.pdf</code>
+            </p>
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label fw-semibold small" data-i18n="lbl_efatura">E-Fatura Görüntüleme URL</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="edocEfatura" placeholder="https://.../{0}.pdf">
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small" data-i18n="lbl_earsiv">E-Arşiv Görüntüleme URL</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="edocEarsiv" placeholder="https://.../{0}.pdf">
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small" data-i18n="lbl_eirsaliye">E-İrsaliye Görüntüleme URL</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="edocEirsaliye" placeholder="https://.../{0}.pdf">
+              </div>
+              <div class="col-12">
+                <button class="btn btn-primary btn-sm" onclick="saveEdocSettings()">
+                  <i class="bi bi-floppy me-1"></i>E-Belge Ayarlarını Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dil Tercihleri -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-translate me-2" style="color:#6cb2eb"></i><span data-i18n="card_lang_pref">Kullanıcı Dil Tercihleri</span></span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadLangSettings()">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Kullanıcıların seçtiği dil tercihleri. Varsayılan dil Türkçe'dir (kayıtsız numara Türkçe alır).
+              Bir kaydı silmek o numarayı varsayılan (TR) diline döndürür.
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover" id="langTable">
+                <thead class="table-light">
+                  <tr>
+                    <th>Telefon</th>
+                    <th>Dil</th>
+                    <th style="width:60px"></th>
+                  </tr>
+                </thead>
+                <tbody id="langTableBody">
+                  <tr><td colspan="3" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bildirim & Diğer -->
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header"><i class="bi bi-bell me-2"></i>Bildirim & Diğer Ayarlar</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold small">Servis Bildirim Şablon Adı</label>
+              <input type="text" class="form-control form-control-sm" id="servisTemplate"
+                placeholder="servis_durum_guncelleme">
+              <div class="form-text">Meta Business Manager'da onaylı WhatsApp template adı</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveNotifSettings()">
+              <i class="bi bi-floppy me-1"></i>Kaydet
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Şifre Değiştir -->
       <div class="col-md-6">
         <div class="card h-100">
-          <div class="card-header"><i class="bi bi-key me-2"></i>Panel Şifresi</div>
+          <div class="card-header"><i class="bi bi-key me-2"></i><span data-i18n="card_password">Panel Şifresi</span></div>
           <div class="card-body">
             <div id="pwAlert" class="alert py-2 d-none"></div>
+            <div class="mb-2 d-flex gap-2 align-items-end">
+              <div class="flex-grow-1">
+                <label class="form-label fw-semibold small">Admin Kullanıcı Adı</label>
+                <input type="text" class="form-control form-control-sm" id="adminUsername" placeholder="admin">
+              </div>
+              <button class="btn btn-outline-secondary btn-sm" onclick="saveAdminUsername()">
+                <i class="bi bi-floppy"></i>
+              </button>
+            </div>
+            <hr class="my-2">
             <div class="mb-2">
-              <label class="form-label fw-semibold small">Mevcut Şifre</label>
+              <label class="form-label fw-semibold small" data-i18n="lbl_cur_pw">Mevcut Şifre</label>
               <input type="password" class="form-control form-control-sm" id="curPw">
             </div>
             <div class="mb-2">
-              <label class="form-label fw-semibold small">Yeni Şifre</label>
+              <label class="form-label fw-semibold small" data-i18n="lbl_new_pw">Yeni Şifre</label>
               <input type="password" class="form-control form-control-sm" id="newPw">
             </div>
             <div class="mb-3">
-              <label class="form-label fw-semibold small">Yeni Şifre (Tekrar)</label>
+              <label class="form-label fw-semibold small" data-i18n="lbl_new_pw2">Yeni Şifre (Tekrar)</label>
               <input type="password" class="form-control form-control-sm" id="newPw2">
             </div>
             <button class="btn btn-primary btn-sm" onclick="changePassword()">
@@ -252,6 +393,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/admin/admin-i18n.js"></script>
 <script>
 function toggleVis(inputId, btn) {
   const inp = document.getElementById(inputId);
@@ -267,39 +409,49 @@ function showAlert(msg, type = 'success') {
   setTimeout(() => el.classList.add('d-none'), 4000);
 }
 
-async function loadStatus() {
-  const res  = await fetch('/admin/api/status');
-  const data = await res.json();
-  document.getElementById('sapDb').textContent = data.companyDb || '—';
-  const dbs = data.databases || [];
-  document.getElementById('sapDbs').innerHTML = dbs
-    .map(d => `<span class="badge bg-light text-dark border me-1">${d}</span>`).join('');
-  const sel = document.getElementById('testDbSelect');
-  sel.innerHTML = dbs.map(d => `<option value="${d}">${d}</option>`).join('');
-}
-
 const ALL_ACTIVITY_TYPES = ['Phone Call', 'Meeting', 'Task', 'Note', 'Email'];
 
 async function loadSettings() {
   const res  = await fetch('/admin/api/settings');
   const data = await res.json();
 
+  // SAP Service Layer
+  document.getElementById('slUrl').value      = data.SAP_SERVICE_LAYER_URL || '';
+  document.getElementById('slCompanyDb').value = data.SAP_COMPANY_DB       || '';
+  document.getElementById('slDatabases').value = data.SAP_DATABASES         || '';
+  document.getElementById('slUsername').value  = data.SAP_USERNAME          || '';
+  document.getElementById('slPasswordStatus').textContent =
+    data.SAP_PASSWORD_SET ? '✓ Şifre kayıtlı' : '⚠ Şifre tanımlı değil';
+
+  // Test DB select
+  const mainDb = data.SAP_COMPANY_DB || '';
+  const extraDbs = (data.SAP_DATABASES || '').split(';').map(d => d.trim()).filter(Boolean);
+  const allDbs = [...new Set([mainDb, ...extraDbs].filter(Boolean))];
+  const sel = document.getElementById('testDbSelect');
+  sel.innerHTML = allDbs.map(d => `<option value="${d}">${d}</option>`).join('') || '<option value="">—</option>';
+
+  // WhatsApp
   document.getElementById('waPhoneId').value = data.WA_PHONE_NUMBER_ID || '';
   document.getElementById('waVerify').value  = data.WA_VERIFY_TOKEN    || '';
-
   document.getElementById('waTokenStatus').textContent =
     data.WA_ACCESS_TOKEN_SET ? '✓ Token kayıtlı (değiştirmek için yeni token gir)' : '⚠ Token tanımlı değil';
-  document.getElementById('anthropicKeyStatus').textContent =
-    data.ANTHROPIC_API_KEY_SET ? '✓ API Key kayıtlı (değiştirmek için yeni key gir)' : '⚠ API Key tanımlı değil';
 
+  // SQL
   document.getElementById('sqlServer').value = data.SAP_DB_SERVER || '';
   document.getElementById('sqlDb').value     = data.SAP_DB_NAME   || '';
   document.getElementById('sqlUser').value   = data.SAP_DB_USER   || '';
   document.getElementById('sqlPasswordStatus').textContent =
     data.SAP_DB_PASSWORD_SET ? '✓ Şifre kayıtlı (değiştirmek için yeni şifre gir)' : '⚠ Şifre tanımlı değil';
 
+  // API Keys
+  document.getElementById('anthropicKeyStatus').textContent =
+    data.ANTHROPIC_API_KEY_SET ? '✓ API Key kayıtlı (değiştirmek için yeni key gir)' : '⚠ API Key tanımlı değil';
+  document.getElementById('openaiKeyStatus').textContent =
+    data.OPENAI_API_KEY_SET ? '✓ API Key kayıtlı (değiştirmek için yeni key gir)' : '⚠ API Key tanımlı değil';
+
   // CRM & Oturum
   document.getElementById('sessionTimeout').value = data.SESSION_TIMEOUT_MINUTES || '480';
+  document.getElementById('attachMaxMb').value    = data.ATTACHMENT_MAX_MB       || '5';
   document.getElementById('crmSubjects').value    = data.CRM_ACTIVE_SUBJECTS     || '';
 
   const activeTypes = (data.CRM_ACTIVE_TYPES || '').split(',').map(t => t.trim()).filter(Boolean);
@@ -312,6 +464,12 @@ async function loadSettings() {
       <label class="form-check-label small" for="${id}">${type}</label>
     </div>`;
   }).join('');
+
+  // Bildirim
+  document.getElementById('servisTemplate').value = data.SERVIS_NOTIF_TEMPLATE || '';
+
+  // Admin kullanıcı adı
+  document.getElementById('adminUsername').value = data.ADMIN_USERNAME || '';
 }
 
 async function saveCrmSettings() {
@@ -330,6 +488,7 @@ async function saveCrmSettings() {
       SESSION_TIMEOUT_MINUTES: timeout,
       CRM_ACTIVE_TYPES:        checked.join(','),
       CRM_ACTIVE_SUBJECTS:     subjects,
+      ATTACHMENT_MAX_MB:       document.getElementById('attachMaxMb').value.trim(),
     }),
   });
   const data = await res.json();
@@ -406,6 +565,26 @@ async function saveSettings() {
   }
 }
 
+async function saveSlSettings() {
+  const body = {
+    SAP_SERVICE_LAYER_URL: document.getElementById('slUrl').value.trim(),
+    SAP_COMPANY_DB:        document.getElementById('slCompanyDb').value.trim(),
+    SAP_DATABASES:         document.getElementById('slDatabases').value.trim(),
+    SAP_USERNAME:          document.getElementById('slUsername').value.trim(),
+  };
+  const pw = document.getElementById('slPassword').value.trim();
+  if (pw) body.SAP_PASSWORD = pw;
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showAlert('SAP Service Layer ayarları kaydedildi. Bağlantı değişikliği için sunucuyu yeniden başlatın.');
+    document.getElementById('slPassword').value = '';
+    loadSettings();
+  } else { showAlert(data.error, 'danger'); }
+}
+
 async function saveAnthropicKey() {
   const key = document.getElementById('anthropicKey').value.trim();
   if (!key) return showAlert('API Key boş olamaz', 'danger');
@@ -423,6 +602,43 @@ async function saveAnthropicKey() {
   } else {
     showAlert(data.error, 'danger');
   }
+}
+
+async function saveOpenaiKey() {
+  const key = document.getElementById('openaiKey').value.trim();
+  if (!key) return showAlert('API Key boş olamaz', 'danger');
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ OPENAI_API_KEY: key }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showAlert('OpenAI API Key kaydedildi');
+    document.getElementById('openaiKey').value = '';
+    loadSettings();
+  } else { showAlert(data.error, 'danger'); }
+}
+
+async function saveNotifSettings() {
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ SERVIS_NOTIF_TEMPLATE: document.getElementById('servisTemplate').value.trim() }),
+  });
+  const data = await res.json();
+  if (res.ok) showAlert('Bildirim ayarları kaydedildi');
+  else showAlert(data.error, 'danger');
+}
+
+async function saveAdminUsername() {
+  const username = document.getElementById('adminUsername').value.trim();
+  if (!username) return showAlert('Kullanıcı adı boş olamaz', 'danger');
+  const res  = await fetch('/admin/api/change-admin-username', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  });
+  const data = await res.json();
+  if (res.ok) showAlert('Admin kullanıcı adı güncellendi');
+  else showAlert(data.error, 'danger');
 }
 
 async function testSap() {
@@ -476,8 +692,67 @@ async function changePassword() {
   }
 }
 
-loadStatus();
+async function loadEdocSettings() {
+  const res  = await fetch('/admin/api/edoc-settings');
+  const data = await res.json();
+  document.getElementById('edocEfatura').value   = data.efatura   || '';
+  document.getElementById('edocEarsiv').value    = data.earsiv    || '';
+  document.getElementById('edocEirsaliye').value = data.eirsaliye || '';
+}
+
+async function saveEdocSettings() {
+  const body = {
+    efatura:   document.getElementById('edocEfatura').value.trim(),
+    earsiv:    document.getElementById('edocEarsiv').value.trim(),
+    eirsaliye: document.getElementById('edocEirsaliye').value.trim(),
+  };
+  const res  = await fetch('/admin/api/edoc-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok) showAlert('E-Belge ayarları kaydedildi');
+  else showAlert(data.error || 'Hata', 'danger');
+}
+
+const LANG_LABELS = { tr: '🇹🇷 Türkçe', en: '🇬🇧 English', ar: '🇸🇦 العربية' };
+
+async function loadLangSettings() {
+  const tbody = document.getElementById('langTableBody');
+  tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span></td></tr>';
+  try {
+    const res  = await fetch('/admin/api/lang-settings');
+    const data = await res.json();
+    const entries = Object.entries(data);
+    if (!entries.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">Kayıtlı tercih yok (hepsi varsayılan TR)</td></tr>';
+      return;
+    }
+    tbody.innerHTML = entries.map(([phone, lang]) => `
+      <tr>
+        <td class="font-monospace">${phone}</td>
+        <td>${LANG_LABELS[lang] || lang}</td>
+        <td>
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Sil" onclick="deleteLangPref('${phone}')">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>`).join('');
+  } catch {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-danger">Yüklenemedi</td></tr>';
+  }
+}
+
+async function deleteLangPref(phone) {
+  if (!confirm(`${phone} numarasının dil tercihini sıfırla (TR'ye döner)?`)) return;
+  await fetch(`/admin/api/lang-settings/${phone}`, { method: 'DELETE' });
+  loadLangSettings();
+}
+
 loadSettings();
+loadEdocSettings();
+loadLangSettings();
 </script>
 </body>
 </html>

@@ -192,6 +192,33 @@ class SLConnection {
   // ─────────────────────────────────────────────────────────
   // Logout (isteğe bağlı – sunucu kapanırken çağır)
   // ─────────────────────────────────────────────────────────
+  async postForm(resource, buffer, fileName, mimeType) {
+    await this._ensureSession();
+    const boundary = `----WA${Date.now()}`;
+    const CRLF     = '\r\n';
+    const head     = Buffer.from(
+      `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="files"; filename="${fileName}"${CRLF}` +
+      `Content-Type: ${mimeType}${CRLF}${CRLF}`
+    );
+    const tail = Buffer.from(`${CRLF}--${boundary}--${CRLF}`);
+    const body = Buffer.concat([head, buffer, tail]);
+
+    try {
+      const res = await this._http.post(resource, body, {
+        headers: {
+          ...this._cookieHeader(),
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        maxBodyLength:    Infinity,
+        maxContentLength: Infinity,
+      });
+      return res.data;
+    } catch (err) {
+      return this._handleError(err, 'POST_FORM', resource);
+    }
+  }
+
   async logout() {
     if (!this._cookie) return;
     try {

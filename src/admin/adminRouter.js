@@ -11,6 +11,8 @@ const { getConnection }                    = require('../modules/sapClient');
 const { readEnv, updateEnv }               = require('./configService');
 const { readLogs }                         = require('../services/logService');
 const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('../services/taskService');
+const { getEdocConfig, saveEdocConfig } = require('../services/edocumentService');
+const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -183,31 +185,49 @@ router.delete('/api/templates/:name', requireAuth, async (req, res) => {
 router.get('/api/settings', requireAuth, (req, res) => {
   const env = readEnv();
   res.json({
-    WA_PHONE_NUMBER_ID:      env.WA_PHONE_NUMBER_ID      || '',
-    WA_VERIFY_TOKEN:         env.WA_VERIFY_TOKEN          || '',
+    // SAP Service Layer
+    SAP_SERVICE_LAYER_URL:   env.SAP_SERVICE_LAYER_URL    || '',
+    SAP_COMPANY_DB:          env.SAP_COMPANY_DB            || '',
+    SAP_DATABASES:           env.SAP_DATABASES             || '',
+    SAP_USERNAME:            env.SAP_USERNAME              || '',
+    SAP_PASSWORD_SET:        !!env.SAP_PASSWORD,
+    // WhatsApp
+    WA_PHONE_NUMBER_ID:      env.WA_PHONE_NUMBER_ID        || '',
+    WA_VERIFY_TOKEN:         env.WA_VERIFY_TOKEN            || '',
     WA_ACCESS_TOKEN_SET:     !!env.WA_ACCESS_TOKEN,
-    ANTHROPIC_API_KEY_SET:   !!env.ANTHROPIC_API_KEY,
-    SAP_DB_SERVER:           env.SAP_DB_SERVER            || '',
-    SAP_DB_NAME:             env.SAP_DB_NAME              || '',
-    SAP_DB_USER:             env.SAP_DB_USER              || '',
+    // SQL
+    SAP_DB_SERVER:           env.SAP_DB_SERVER             || '',
+    SAP_DB_NAME:             env.SAP_DB_NAME               || '',
+    SAP_DB_USER:             env.SAP_DB_USER               || '',
     SAP_DB_PASSWORD_SET:     !!env.SAP_DB_PASSWORD,
-    SESSION_TIMEOUT_MINUTES: env.SESSION_TIMEOUT_MINUTES  || '480',
-    CRM_ACTIVE_TYPES:        env.CRM_ACTIVE_TYPES         || '',
-    CRM_ACTIVE_SUBJECTS:     env.CRM_ACTIVE_SUBJECTS      || '',
+    // API Keys
+    ANTHROPIC_API_KEY_SET:   !!env.ANTHROPIC_API_KEY,
+    OPENAI_API_KEY_SET:      !!env.OPENAI_API_KEY,
+    // CRM & Oturum
+    SESSION_TIMEOUT_MINUTES: env.SESSION_TIMEOUT_MINUTES   || '480',
+    CRM_ACTIVE_TYPES:        env.CRM_ACTIVE_TYPES          || '',
+    CRM_ACTIVE_SUBJECTS:     env.CRM_ACTIVE_SUBJECTS       || '',
+    ATTACHMENT_MAX_MB:       env.ATTACHMENT_MAX_MB         || '5',
+    // Bildirim & Diğer
+    SERVIS_NOTIF_TEMPLATE:   env.SERVIS_NOTIF_TEMPLATE     || '',
+    // Admin
+    ADMIN_USERNAME:          getAdminCfg().username        || 'admin',
   });
 });
 
 router.post('/api/settings', requireAuth, (req, res) => {
   const allowed = [
-    'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY',
+    'SAP_SERVICE_LAYER_URL', 'SAP_COMPANY_DB', 'SAP_DATABASES', 'SAP_USERNAME', 'SAP_PASSWORD',
+    'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN',
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
     'SAP_DB_SERVER', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
-    'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS',
+    'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',
+    'SERVIS_NOTIF_TEMPLATE',
   ];
+  const sensitiveKeys = new Set(['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'SAP_PASSWORD', 'SAP_DB_PASSWORD']);
   const updates = {};
   for (const key of allowed) {
-    // Şifre/token alanları: boş gelirse atla; diğerleri: boş string de kaydedilebilir (örn. CRM_ACTIVE_SUBJECTS)
-    const sensitiveKeys = ['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'SAP_DB_PASSWORD'];
-    if (sensitiveKeys.includes(key)) {
+    if (sensitiveKeys.has(key)) {
       if (req.body[key]) updates[key] = req.body[key];
     } else if (req.body[key] !== undefined) {
       updates[key] = req.body[key];
@@ -217,18 +237,25 @@ router.post('/api/settings', requireAuth, (req, res) => {
 
   updateEnv(updates);
 
-  // Runtime güncelle (yeniden başlatma gerektirmez)
-  if (updates.WA_ACCESS_TOKEN)        config.whatsapp.accessToken   = updates.WA_ACCESS_TOKEN;
-  if (updates.WA_PHONE_NUMBER_ID)     config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
-  if (updates.WA_VERIFY_TOKEN)        config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
-  if (updates.ANTHROPIC_API_KEY)      config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
-  if (updates.SAP_DB_SERVER)          config.sapDb.server           = updates.SAP_DB_SERVER;
-  if (updates.SAP_DB_NAME)            config.sapDb.database         = updates.SAP_DB_NAME;
-  if (updates.SAP_DB_USER)            config.sapDb.user             = updates.SAP_DB_USER;
-  if (updates.SAP_DB_PASSWORD)        config.sapDb.password         = updates.SAP_DB_PASSWORD;
+  // Runtime güncelle
+  if (updates.SAP_SERVICE_LAYER_URL) config.sap.serviceLayerUrl = updates.SAP_SERVICE_LAYER_URL;
+  if (updates.SAP_COMPANY_DB)        config.sap.companyDb       = updates.SAP_COMPANY_DB;
+  if (updates.SAP_DATABASES !== undefined) config.sap.databases = updates.SAP_DATABASES || null;
+  if (updates.SAP_USERNAME)          config.sap.username        = updates.SAP_USERNAME;
+  if (updates.SAP_PASSWORD)          config.sap.password        = updates.SAP_PASSWORD;
+  if (updates.WA_ACCESS_TOKEN)       config.whatsapp.accessToken   = updates.WA_ACCESS_TOKEN;
+  if (updates.WA_PHONE_NUMBER_ID)    config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
+  if (updates.WA_VERIFY_TOKEN)       config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
+  if (updates.ANTHROPIC_API_KEY)     config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
+  if (updates.SAP_DB_SERVER)         config.sapDb.server           = updates.SAP_DB_SERVER;
+  if (updates.SAP_DB_NAME)           config.sapDb.database         = updates.SAP_DB_NAME;
+  if (updates.SAP_DB_USER)           config.sapDb.user             = updates.SAP_DB_USER;
+  if (updates.SAP_DB_PASSWORD)       config.sapDb.password         = updates.SAP_DB_PASSWORD;
   if (updates.SESSION_TIMEOUT_MINUTES) process.env.SESSION_TIMEOUT_MINUTES = updates.SESSION_TIMEOUT_MINUTES;
   if (updates.CRM_ACTIVE_TYPES !== undefined)    process.env.CRM_ACTIVE_TYPES    = updates.CRM_ACTIVE_TYPES;
   if (updates.CRM_ACTIVE_SUBJECTS !== undefined) process.env.CRM_ACTIVE_SUBJECTS = updates.CRM_ACTIVE_SUBJECTS;
+  if (updates.ATTACHMENT_MAX_MB !== undefined)   process.env.ATTACHMENT_MAX_MB   = updates.ATTACHMENT_MAX_MB;
+  if (updates.SERVIS_NOTIF_TEMPLATE !== undefined) process.env.SERVIS_NOTIF_TEMPLATE = updates.SERVIS_NOTIF_TEMPLATE;
 
   res.json({ ok: true });
 });
@@ -265,6 +292,42 @@ router.delete('/api/tasks/:id', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// API – E-Belge Entegrasyonu
+// ─────────────────────────────────────────────────────────────
+router.get('/api/edoc-settings', requireAuth, (_req, res) => {
+  res.json(getEdocConfig());
+});
+
+router.post('/api/edoc-settings', requireAuth, (req, res) => {
+  const { efatura, earsiv, eirsaliye } = req.body || {};
+  saveEdocConfig({
+    efatura:   (efatura   || '').trim(),
+    earsiv:    (earsiv    || '').trim(),
+    eirsaliye: (eirsaliye || '').trim(),
+  });
+  res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Dil Tercihleri
+// ─────────────────────────────────────────────────────────────
+router.get('/api/lang-settings', requireAuth, (_req, res) => {
+  res.json(getAllPrefs());
+});
+
+router.post('/api/lang-settings', requireAuth, (req, res) => {
+  const { phone, lang } = req.body || {};
+  if (!phone || !lang) return res.status(400).json({ error: 'phone ve lang zorunlu' });
+  setLang(phone, lang);
+  res.json({ ok: true });
+});
+
+router.delete('/api/lang-settings/:phone', requireAuth, (req, res) => {
+  deleteLang(req.params.phone);
+  res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
 // API – Mesaj Logları
 // ─────────────────────────────────────────────────────────────
 router.get('/api/logs', requireAuth, (req, res) => {
@@ -298,6 +361,17 @@ router.post('/api/test-sqldb', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // API – Şifre Değiştir
 // ─────────────────────────────────────────────────────────────
+
+router.post('/api/change-admin-username', requireAuth, (req, res) => {
+  const { username } = req.body || {};
+  if (!username || username.trim().length < 2) {
+    return res.status(400).json({ error: 'Kullanıcı adı en az 2 karakter olmalı' });
+  }
+  const cfg = getAdminCfg();
+  cfg.username = username.trim();
+  saveAdminCfg(cfg);
+  res.json({ ok: true });
+});
 
 router.post('/api/change-password', requireAuth, (req, res) => {
   const { currentPassword, newPassword } = req.body || {};

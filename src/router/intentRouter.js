@@ -18,18 +18,27 @@
 
 const axios  = require('axios');
 const config = require('../config/config');
-const { sendText }   = require('../services/whatsappService');
+const { sendText, sendButtons } = require('../services/whatsappService');
 const { writeLog }   = require('../services/logService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { loginUser }  = require('../modules/sapAuth');
+const { t, langInstruction } = require('../services/i18n');
+const { getLang, setLang }   = require('../services/langService');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
 const {
   handleCreateActivity, handleWizardInput,
   handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
   handleWizardFirmSelection,
   getWizardState, confirmActivity, skipLocation,
+  handleMediaAttachment, cancelAttachment,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
 } = require('../modules/crmActivity');
+
+const {
+  handleCreateServiceCall, handleServiceWizardInput,
+  handleServiceCustomerSelection, handleServicePriority,
+  getServiceWizardState, confirmServiceCall,
+} = require('../modules/serviceCallWizard');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
@@ -53,6 +62,7 @@ async function handleIncoming({ from, text }) {
     if (awaitingPw) {
       clearAwaitingPassword(from);
       const result = await loginUser(awaitingPw.userCode, text.trim());
+      const lang = getLang(from);
       if (result.success) {
         createSession(from, {
           userCode:   awaitingPw.userCode,
@@ -60,25 +70,15 @@ async function handleIncoming({ from, text }) {
           userName:   awaitingPw.userName,
           b1session:  result.b1session,
         });
-        const ttl = Math.round(parseInt(process.env.SESSION_TIMEOUT_MINUTES || '480') / 60);
-        return await sendText(from,
-          `✅ *Giriş başarılı!*\n\n` +
-          `Hoş geldiniz, *${awaitingPw.userName}*\n` +
-          `Oturum ${ttl} saat geçerli.\n\n` +
-          `Aktivite oluşturmak için doğal dille yazabilirsiniz.\nÖrnek: _"ABC ile toplantı yaptık, teklif konuştuk"_`
-        );
+        return await sendText(from, t(lang, 'login_success', { name: awaitingPw.userName }));
       }
-      return await sendText(from, `❌ *Giriş başarısız*\n\n${result.error}\n\nTekrar denemek için *giriş yap* yazın.`);
+      return await sendText(from, t(lang, 'login_failed'));
     }
 
     // ── 2. Yetki kontrolü (OUSR veya OCPR) ───────────────────
     const user = await resolveUser(from);
     if (!user) {
-      return await sendText(from,
-        '⛔ *Yetkiniz Bulunmamaktadır*\n\n' +
-        'Bu botu kullanabilmek için SAP B1 sistemine tanımlı olmanız gerekmektedir.\n\n' +
-        'Lütfen sistem yöneticinizle iletişime geçin.'
-      );
+      return await sendText(from, t(getLang(from), 'unknown_user'));
     }
 
     // ── 3. Buton cevapları → direkt yönlendir ────────────────
@@ -99,8 +99,39 @@ async function handleIncoming({ from, text }) {
       const wddCode = text.slice('ONAY_DETAIL:'.length).trim();
       return await approval.showOrderDetail({ from, wddCode });
     }
+    if (text.startsWith('LANG:')) {
+      const lang = text.slice('LANG:'.length).trim().toLowerCase();
+      setLang(from, lang);
+      return await sendText(from, t(lang, 'lang_changed'));
+    }
+    if (upper === 'SVC_SAVE')      return await confirmServiceCall(from);
+    if (upper === 'SVC_CANCEL')    return await sendText(from, '🚫 Servis çağrısı iptal edildi.');
+    if (upper === 'SVC_SERIAL:SKIP') {
+      const ss = getServiceWizardState(from);
+      if (ss) return await handleServiceWizardInput(from, '*');
+    }
+    if (text.startsWith('SVC_CUST:')) {
+      const payload  = text.slice('SVC_CUST:'.length);
+      const sepIdx   = payload.indexOf('|');
+      const cardCode = sepIdx >= 0 ? payload.slice(0, sepIdx).trim() : payload.trim();
+      const cardName = sepIdx >= 0 ? payload.slice(sepIdx + 1).trim() : '';
+      return await handleServiceCustomerSelection(from, cardCode, cardName);
+    }
+    if (text.startsWith('SVC_PRI:')) {
+      return await handleServicePriority(from, text.slice('SVC_PRI:'.length).trim());
+    }
     if (upper === 'ACT_SAVE')      return await confirmActivity(from);
     if (upper === 'ACT_LOC:SKIP')  return await skipLocation(from);
+    if (upper === 'ACT_ATTACH') {
+      return await sendText(from,
+        '📎 Dosyanızı veya fotoğrafınızı gönderin.\n' +
+        '_(PDF, Word, Excel, görsel desteklenir — 5 dk içinde gönderilmeli)_'
+      );
+    }
+    if (upper === 'ACT_DONE') {
+      cancelAttachment(from);
+      return;
+    }
     if (upper === 'LEAD_SAVE')     return await confirmLead(from);
     if (upper === 'LEAD_CANCEL')   return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.');
     if (upper === 'ACT_CANCEL')    return await sendText(from, '🚫 Aktivite iptal edildi.');
@@ -122,8 +153,9 @@ async function handleIncoming({ from, text }) {
     }
 
     // ── 4. Wizard modu ───────────────────────────────────────
-    if (getLeadWizardState(from)) return await handleLeadWizardInput(from, text);
-    if (getWizardState(from))     return await handleWizardInput(from, text);
+    if (getLeadWizardState(from))    return await handleLeadWizardInput(from, text);
+    if (getWizardState(from))        return await handleWizardInput(from, text);
+    if (getServiceWizardState(from)) return await handleServiceWizardInput(from, text);
 
     // ── 5. Intent belirle (keyword → Claude Haiku fallback) ──
     const intent = await detectIntentLocal(text);
@@ -131,9 +163,7 @@ async function handleIncoming({ from, text }) {
 
     // ── 5. Lisans kontrolü ───────────────────────────────────
     if (!canAccessIntent(user, intent.intent)) {
-      return await sendText(from,
-        `⛔ *Yetersiz Lisans*\n\n*${user.license}* lisansınız bu işlem için yeterli değil.\n\nKullanabileceğiniz özellikler için *yardım* yazın.`
-      );
+      return await sendText(from, t(user.lang, 'license_denied', { license: user.license }));
     }
 
     // ── 6. Modüle yönlendir ───────────────────────────────────
@@ -144,18 +174,16 @@ async function handleIncoming({ from, text }) {
           return await sendText(from, '⛔ Müşteri hesapları için oturum açma özelliği bulunmamaktadır.');
         }
         setAwaitingPassword(from, { userCode: user.userCode, userName: user.name });
-        return await sendText(from,
-          `🔐 *SAP Girişi*\n\nMerhaba *${user.name}*,\nLütfen SAP B1 şifrenizi yazın.\n\n_⚠️ Mesajınız 2 dakika içinde işlenecektir._`
-        );
+        return await sendText(from, t(user.lang, 'login_prompt', { name: user.name }));
       }
 
       case 'logout': {
         const session = getSession(from);
         if (session) {
           deleteSession(from);
-          return await sendText(from, `👋 Oturum kapatıldı. Görüşmek üzere, *${session.userName}*!`);
+          return await sendText(from, t(user.lang, 'logout_success', { name: session.userName }));
         }
-        return await sendText(from, 'ℹ️ Zaten aktif bir oturumunuz bulunmuyor.');
+        return await sendText(from, t(user.lang, 'no_session'));
       }
 
       case 'lead': {
@@ -181,7 +209,7 @@ async function handleIncoming({ from, text }) {
       }
 
       case 'cashflow':
-        return await cashflow.handleQuery({ from, question: text, licenseRestriction: user.cashflowRestriction, customerCardCode: user.customerCardCode });
+        return await cashflow.handleQuery({ from, question: text, licenseRestriction: user.cashflowRestriction, customerCardCode: user.customerCardCode, lang: user.lang });
 
       case 'approval': {
         const docMatch = text.match(/\d+/);
@@ -191,17 +219,36 @@ async function handleIncoming({ from, text }) {
         return await approval.handleApproval({ from, docEntry });
       }
 
+      case 'service_call': {
+        const session = getSession(from);
+        if (!session) {
+          return await sendText(from, t(user.lang, 'login_required'));
+        }
+        return await handleCreateServiceCall({ from, session, dbName: user.dbName });
+      }
+
+      case 'lang':
+        return await sendButtons(from,
+          t(user.lang, 'lang_select'),
+          '🇹🇷 Türkçe  |  🇬🇧 English  |  🇸🇦 العربية',
+          [
+            { id: 'LANG:tr', title: '🇹🇷 Türkçe'  },
+            { id: 'LANG:en', title: '🇬🇧 English'  },
+            { id: 'LANG:ar', title: '🇸🇦 العربية' },
+          ]
+        );
+
       case 'support':
         return await support.handleSupport({ from, question: text });
 
       case 'help':
       default:
-        return await sendHelpMenu(from);
+        return await sendText(from, t(user.lang, 'help_menu'));
     }
 
   } catch (err) {
     console.error(`[Router] Hata (${from}):`, err.message);
-    await sendText(from, '⚠️ Bir hata oluştu. Lütfen tekrar deneyin veya *yardım* yazın.');
+    await sendText(from, t(getLang(from), 'error_general'));
   }
 }
 
@@ -225,8 +272,12 @@ function _keywordIntent(text) {
   if (t.includes('çıkış') || t.includes('logout') || t.includes('oturumu kapat') || t.includes('oturum kapat'))
     return { intent: 'logout', confidence: 0.97, reason: 'keyword' };
 
-  if (t === 'yardım' || t === 'menü' || t === 'yardım?' || t === 'ne yapabilirsin' || t === 'ne yapabilirsin?')
+  if (t === 'yardım' || t === 'menü' || t === 'yardım?' || t === 'ne yapabilirsin' || t === 'ne yapabilirsin?' ||
+      t === 'help' || t === 'مساعدة')
     return { intent: 'help', confidence: 0.97, reason: 'keyword' };
+
+  if (t === 'dil seç' || t === 'select language' || t === 'اختر اللغة' || t === '/dil' || t === '/lang')
+    return { intent: 'lang', confidence: 0.99, reason: 'keyword' };
 
   if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay'))
     return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
@@ -250,6 +301,15 @@ function _keywordIntent(text) {
   )
     return { intent: 'crm', confidence: 0.90, reason: 'keyword' };
 
+  // Servis çağrısı oluşturma
+  if (
+    /servis\s+(çağrısı|çagri)\s*(oluştur|aç|ekle|kaydet|bildir)/.test(t) ||
+    /arıza\s*(bildir|kaydı|aç|oluştur)/.test(t) ||
+    /teknik\s+destek\s*(talebi|oluştur|aç)/.test(t) ||
+    t === 'servis çağrısı' || t === 'arıza bildir'
+  )
+    return { intent: 'service_call', confidence: 0.95, reason: 'keyword' };
+
   // SAP hata kodları
   if (/-\d+ (hatası|kodu)/.test(t) || t.includes('dönem kapalı'))
     return { intent: 'support', confidence: 0.92, reason: 'keyword' };
@@ -264,9 +324,10 @@ Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini JSON 
 MODÜLLER:
 - "cashflow"  → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
 - "approval"  → Satın alma siparişi ONAYLAMA veya REDDETME
-- "crm"       → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
-- "lead"      → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
-- "support"   → SAP hata mesajları, nasıl yapılır soruları, teknik destek
+- "crm"          → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
+- "lead"         → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
+- "service_call" → Servis çağrısı / arıza bildirimi / teknik destek talebi OLUŞTURMA
+- "support"      → SAP hata mesajları, nasıl yapılır soruları, teknik destek
 - "help"      → Yardım menüsü
 
 KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
@@ -300,49 +361,6 @@ async function _claudeIntent(text) {
     console.warn('[Router] Claude intent hatası, cashflow\'a düşüyor:', err.message);
     return { intent: 'cashflow', confidence: 0.5, reason: 'fallback' };
   }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Yardım menüsü
-// ─────────────────────────────────────────────────────────────
-async function sendHelpMenu(to) {
-  const msg = [
-    '👋 *SAP B1 WhatsApp Asistanı*',
-    '',
-    'Bana doğal dille sorabilirsiniz:',
-    '',
-    '📊 *Sorgulama*',
-    '  • "C001 carisinin bakiyesi nedir?"',
-    '  • "Bu hafta vadesi gelen ödemeler"',
-    '  • "Vida ürününün stok miktarı"',
-    '  • "Bugün vadesi gelen tahsilatlar"',
-    '',
-    '✅ *Onay İşlemleri*',
-    '  • "Bekleyen onaylarım var mı?"',
-    '  • "456 numaralı siparişi onayla"',
-    '',
-    '🔧 *Teknik Servis*',
-    '  • "MB00001 müşterisinin servis çağrıları"',
-    '  • "Açık servis çağrıları"',
-    '  • "SN12345 seri nolu cihazın durumu"',
-    '  • "Hizmet çağrısı 14 nedir?"',
-    '',
-    '🤝 *CRM*',
-    '  • "MB00001\'in aktiviteleri"',
-    '  • "MB00001 için telefon görüşmesi aktivitesi ekle"',
-    '  • "Yeni aday müşteri ekle: ABC Firma, 05001234567"',
-    '  • "Açık satış fırsatları"',
-    '  • "Yeni fırsat ekle: MB00001, Sunucu Satışı"',
-    '',
-    '🛠 *SAP Destek*',
-    '  • "-10 hatası nasıl çözülür?"',
-    '  • "Fatura nasıl iptal edilir?"',
-    '  • "Dönem kapalı hatası aldım"',
-    '',
-    '❓ *yardım* → Bu menü',
-  ].join('\n');
-
-  await sendText(to, msg);
 }
 
 module.exports = { handleIncoming };

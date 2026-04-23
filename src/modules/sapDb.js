@@ -500,7 +500,7 @@ async function getUserByPhone(phone10, dbName) {
   request.input('Phone', sql.NVarChar(20), `%${phone10}`);
 
   const result = await request.query(`
-    SELECT TOP 1 USER_CODE, U_NAME, PortNum
+    SELECT TOP 1 USER_CODE, U_NAME, PortNum, Language
     FROM OUSR WITH(NOLOCK)
     WHERE PortNum LIKE @Phone
   `);
