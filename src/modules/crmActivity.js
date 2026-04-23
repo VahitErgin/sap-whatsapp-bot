@@ -17,6 +17,7 @@ const config = require('../config/config');
 const { getConnection }  = require('./sapClient');
 const { resolveCardCode } = require('./sapDb');
 const { sendText, sendButtons, sendList } = require('../services/whatsappService');
+const { getLocation } = require('./sessionManager');
 
 // ── Wizard durumu ─────────────────────────────────────────────
 const _wizard    = new Map();
@@ -253,10 +254,16 @@ async function confirmActivity(from) {
 
   try {
     const sl      = getConnection(dbName || config.sap.companyDb);
+    const loc      = getLocation(from);
+    const locNote  = loc
+      ? `\n📍 ${loc.latitude},${loc.longitude}` +
+        (loc.name ? ` (${loc.name})` : '')
+      : '';
+
     const payload = {
       Activity:     _actionEnum(activityData.action),
       ActivityDate: activityData.activityDate,
-      Notes:        activityData.notes,
+      Notes:        (activityData.notes || '') + locNote,
     };
 
     if (activityData.cardCode)     payload.CardCode         = activityData.cardCode;

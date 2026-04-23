@@ -68,6 +68,28 @@ app.post('/webhook', async (req, res) => {
     const from    = message.from;
     const msgType = message.type; // text | interactive | audio
 
+    // ── Konum mesajı — session'a kaydet, sessizce geç ──────────
+    if (msgType === 'location') {
+      const loc = message.location;
+      if (loc?.latitude && loc?.longitude) {
+        const { setLocation } = require('./modules/sessionManager');
+        const { writeLog }    = require('./services/logService');
+        setLocation(from, loc);
+        writeLog({
+          phone:     from,
+          dir:       'in',
+          type:      'location',
+          latitude:  loc.latitude,
+          longitude: loc.longitude,
+          name:      loc.name    || null,
+          address:   loc.address || null,
+          text:      `📍 ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}`,
+        });
+        console.log(`[Konum] ${from}: ${loc.latitude}, ${loc.longitude}`);
+      }
+      return;
+    }
+
     // ── Sesli mesaj ────────────────────────────────────────────
     if (msgType === 'audio') {
       const mediaId = message.audio?.id;

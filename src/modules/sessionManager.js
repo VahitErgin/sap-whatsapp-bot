@@ -7,7 +7,7 @@
 // Sunucu yeniden başladığında oturumlar sıfırlanır → tekrar giriş gerekir.
 // ─────────────────────────────────────────────────────────────
 
-// Aktif oturumlar: phone10 → { userCode, employeeId, userName, expiresAt }
+// Aktif oturumlar: phone10 → { userCode, employeeId, userName, b1session, expiresAt }
 const _sessions = new Map();
 
 // Şifre bekleme durumu: phone10 → { userCode, userName, expiresAt }
@@ -25,13 +25,14 @@ function getSessionTtlMs() {
 // ─────────────────────────────────────────────────────────────
 // Oturum işlemleri
 // ─────────────────────────────────────────────────────────────
-function createSession(phone, { userCode, employeeId, userName }) {
+function createSession(phone, { userCode, employeeId, userName, b1session }) {
   const phone10 = _normalize(phone);
   _sessions.set(phone10, {
     userCode,
     employeeId,
     userName,
-    expiresAt: Date.now() + getSessionTtlMs(),
+    b1session:  b1session || null,
+    expiresAt:  Date.now() + getSessionTtlMs(),
   });
   console.log(`[Session] Açıldı: ${phone10} → ${userCode} (${userName})`);
 }
@@ -51,6 +52,24 @@ function deleteSession(phone) {
   const phone10 = _normalize(phone);
   _sessions.delete(phone10);
   console.log(`[Session] Kapatıldı: ${phone10}`);
+}
+
+function setLocation(phone, { latitude, longitude, name, address }) {
+  const phone10 = _normalize(phone);
+  const session = _sessions.get(phone10);
+  if (!session) return;
+  session.location = {
+    latitude:  Number(latitude),
+    longitude: Number(longitude),
+    name:      name    || null,
+    address:   address || null,
+    ts:        Date.now(),
+  };
+}
+
+function getLocation(phone) {
+  const session = getSession(phone);
+  return session?.location || null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -87,4 +106,4 @@ function _normalize(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
-module.exports = { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword };
+module.exports = { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword, setLocation, getLocation };
