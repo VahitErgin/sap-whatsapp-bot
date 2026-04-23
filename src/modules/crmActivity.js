@@ -162,9 +162,33 @@ async function handleWizardInput(from, text) {
 
   } else if (state.step === 'note') {
     state.notes = text.trim();
-    _wizard.delete(_norm(from));
-    await _showSummary(from, state);
+    await _askLocation(from, state);
+  } else if (state.step === 'location') {
+    // Kullanıcı metin yazdı, konum bekleniyor — hatırlat
+    await sendText(from,
+      `📍 Lütfen konumunuzu paylaşın.\n\n` +
+      `WhatsApp'ta *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\n` +
+      `_Aktivite, konum alınmadan tamamlanamaz._`
+    );
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// handleWizardLocation — location mesajı geldiğinde çağrılır
+// ─────────────────────────────────────────────────────────────
+async function handleWizardLocation(from, location) {
+  const state = getWizardState(from);
+  if (!state || state.step !== 'location') return false; // wizard'da değil
+
+  state.location = {
+    latitude:  Number(location.latitude),
+    longitude: Number(location.longitude),
+    name:      location.name    || null,
+    address:   location.address || null,
+  };
+  _wizard.delete(_norm(from));
+  await _showSummary(from, state);
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -254,10 +278,9 @@ async function confirmActivity(from) {
 
   try {
     const sl      = getConnection(dbName || config.sap.companyDb);
-    const loc      = getLocation(from);
-    const locNote  = loc
-      ? `\n📍 ${loc.latitude},${loc.longitude}` +
-        (loc.name ? ` (${loc.name})` : '')
+    const loc     = activityData.location;
+    const locNote = loc
+      ? `\n📍 ${loc.latitude},${loc.longitude}` + (loc.name ? ` (${loc.name})` : '')
       : '';
 
     const payload = {
@@ -337,6 +360,24 @@ async function _sendSubjectList(from, subjects) {
   await sendList(from, '📌 Konu Seçin', 'Aktivite konusunu seçin:', 'Konu Seç', [{ title: 'Konular', rows }]);
 }
 
+async function _askLocation(from, state) {
+  // Session'da zaten konum varsa direkt özete geç
+  const existing = getLocation(from);
+  if (existing) {
+    state.location = existing;
+    _wizard.delete(_norm(from));
+    return _showSummary(from, state);
+  }
+  // Yoksa kullanıcıdan iste
+  state.step = 'location';
+  _wizard.set(_norm(from), state);
+  await sendText(from,
+    `📍 *Konumunuzu paylaşın*\n\n` +
+    `WhatsApp'ta *📎 → Konum → Mevcut konumunuzu paylaşın* seçeneğini kullanın.\n\n` +
+    `_Aktivite, konum alınmadan tamamlanamaz._`
+  );
+}
+
 async function _showSummary(from, state) {
   const today = new Date().toISOString().split('T')[0];
   const catName = state.activityType
@@ -346,6 +387,7 @@ async function _showSummary(from, state) {
     ? (state.actSubjects.find(s => String(s.Code) === String(state.subjectCode))?.Name || state.subjectCode)
     : null;
 
+  const loc = state.location;
   const activityData = {
     cardCode:     state.cardCode,
     cardName:     state.cardName,
@@ -356,16 +398,18 @@ async function _showSummary(from, state) {
     activityDate: today,
     employeeId:   state.session.employeeId,
     userName:     state.session.userName,
+    location:     loc || null,
   };
 
   const summary = [
     `👤 *Kullanıcı:* ${state.session.userName}`,
     state.cardName ? `🏢 *Muhatap:* ${state.cardName}` : '',
     `📋 *Tip:* ${activityData.action}`,
-    catName  ? `🗂 *Tür:* ${catName}`   : '',
-    subName  ? `📌 *Konu:* ${subName}`  : '',
+    catName ? `🗂 *Tür:* ${catName}` : '',
+    subName ? `📌 *Konu:* ${subName}` : '',
     `📅 *Tarih:* ${today}`,
     `📝 *Not:* ${activityData.notes}`,
+    loc ? `📍 *Konum:* ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}` : '',
   ].filter(Boolean).join('\n');
 
   _pendingActivity.set(_norm(from), { activityData, dbName: state.dbName, expiresAt: Date.now() + PENDING_TTL });
@@ -562,6 +606,7 @@ module.exports = {
   handleWizardSubjectSelection,
   handleWizardFirmSelection,
   getWizardState,
+  handleWizardLocation,
   confirmActivity,
   getActivityTypes,
   getActivitySubjects,

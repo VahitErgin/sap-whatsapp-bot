@@ -72,8 +72,11 @@ app.post('/webhook', async (req, res) => {
     if (msgType === 'location') {
       const loc = message.location;
       if (loc?.latitude && loc?.longitude) {
-        const { setLocation } = require('./modules/sessionManager');
-        const { writeLog }    = require('./services/logService');
+        const { setLocation }        = require('./modules/sessionManager');
+        const { writeLog }           = require('./services/logService');
+        const { handleWizardLocation } = require('./modules/crmActivity');
+
+        // Her durumda session'a kaydet
         setLocation(from, loc);
         writeLog({
           phone:     from,
@@ -86,6 +89,9 @@ app.post('/webhook', async (req, res) => {
           text:      `📍 ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}`,
         });
         console.log(`[Konum] ${from}: ${loc.latitude}, ${loc.longitude}`);
+
+        // Wizard konum adımını bekliyor ise ilerlet
+        await handleWizardLocation(from, loc);
       }
       return;
     }
