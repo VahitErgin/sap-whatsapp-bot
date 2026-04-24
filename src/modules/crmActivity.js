@@ -474,18 +474,19 @@ async function _sendSubjectList(from, subjects) {
 }
 
 async function _askDate(from, state) {
+  // Varsayılan: şu an
+  const now = new Date();
+  state.activityDate = now.toISOString().split('T')[0];
+  state.activityTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
   state.step = 'date';
   _wizard.set(_norm(from), state);
-  const today    = _isoToTR(new Date().toISOString().split('T')[0]);
-  const tomorrowDt = new Date(Date.now() + 86400000);
-  const tomorrow = _isoToTR(tomorrowDt.toISOString().split('T')[0]);
+
   await sendButtons(from,
-    '📅 Aktivite Tarihi',
-    `Aktivitenin gerçekleşeceği tarihi seçin.\n_Farklı bir tarih için DD.MM.YYYY formatında yazabilirsiniz._`,
+    '📅 Tarih & Saat',
+    `*${_isoToTR(state.activityDate)} – ${state.activityTime}* olarak ayarlandı.\nDevam et veya değiştir.`,
     [
-      { id: 'ACT_DATE:today',    title: `Bugün (${today})`   },
-      { id: 'ACT_DATE:tomorrow', title: `Yarın (${tomorrow})` },
-      { id: 'ACT_DATE:custom',   title: '✏️ Başka Tarih Gir'  },
+      { id: 'ACT_DATE:confirm', title: '✓ Devam'                },
+      { id: 'ACT_DATE:change',  title: '✏️ Tarih / Saat Değiştir' },
     ]
   );
 }
@@ -511,7 +512,23 @@ async function handleWizardDateSelection(from, option) {
   if (!state) return;
   _refreshTTL(from, state);
 
-  if (option === 'today') {
+  if (option === 'confirm') {
+    // Varsayılan tarih+saat zaten state'e yazıldı, direkt konuma geç
+    await _askLocation(from, state);
+  } else if (option === 'change') {
+    // Tarih seçim butonlarını göster
+    const today    = _isoToTR(new Date().toISOString().split('T')[0]);
+    const tomorrow = _isoToTR(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
+    await sendButtons(from,
+      '📅 Tarih Seç',
+      'Hangi tarih? Ya da DD.MM.YYYY formatında yazın.',
+      [
+        { id: 'ACT_DATE:today',    title: `Bugün (${today})`    },
+        { id: 'ACT_DATE:tomorrow', title: `Yarın (${tomorrow})`  },
+        { id: 'ACT_DATE:custom',   title: '✏️ Başka Tarih Gir'   },
+      ]
+    );
+  } else if (option === 'today') {
     state.activityDate = new Date().toISOString().split('T')[0];
     _wizard.set(_norm(from), state);
     await _askTime(from, state);
