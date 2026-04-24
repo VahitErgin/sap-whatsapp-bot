@@ -301,6 +301,15 @@ function _keywordIntent(text) {
   )
     return { intent: 'crm', confidence: 0.90, reason: 'keyword' };
 
+  // Servis listeleme / sorgulama (cashflow'a gitmeli)
+  if (
+    /(serviste|servislerde)\s*(bekleyen|açık|devam|liste)/.test(t) ||
+    /bekleyen\s+servis/.test(t) ||
+    /servis\s+(listesi|kayıtları|durumu|sorgula|göster|sorgulama)/.test(t) ||
+    /teknik\s+servis\s+(listesi|kayıt|bekleyen|açık|sorgula)/.test(t)
+  )
+    return { intent: 'cashflow', confidence: 0.93, reason: 'keyword-service-list' };
+
   // Servis çağrısı oluşturma
   if (
     /servis\s+(çağrısı|çagri)\s*(oluştur|aç|ekle|kaydet|bildir)/.test(t) ||
@@ -331,6 +340,7 @@ MODÜLLER:
 - "help"      → Yardım menüsü
 
 KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
+KRİTİK: Bekleyen/açık servis GÖRME/LISTELEME → cashflow | Servis çağrısı OLUŞTURMA/AÇMA → service_call
 
 YANIT (sadece JSON):
 {"intent":"cashflow","confidence":0.9,"reason":"kısa açıklama"}`;
