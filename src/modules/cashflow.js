@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokSeriListesi } = require('./sapDb');
 const { sendText, sendList }         = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -141,6 +141,13 @@ Stokta olup satışı olmayan ürünler:
   startDate/endDate opsiyonel — verilmezse tüm zamanlar kontrol edilir
   → Kullanım: "satılmayan stoklar", "stokta olup satışı olmayan", "hareketsiz stok", "ölü stok"
 
+Müşteriye ait seri bazlı depo stok listesi (BE1_STOKSERILISTE_ALL):
+  endpoint: "SQL_STOK_SERI"
+  params: { "cardCode": "MB00119", "whsCode": "M1" }
+  cardCode zorunlu — kullanıcının kendi kodu (sistem otomatik kilitler)
+  whsCode zorunlu — kullanıcının mesajından çıkar (M1, M2, vs.)
+  → Kullanım: "M1 depo stoğum", "depodaki mallarım", "M1 warehouse stoğu", "depo stok listesi M1"
+
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
 - Cari adından CardCode bulmak için BusinessPartners + başka endpoint şeklinde 2 sorgu YAZMA.
@@ -218,7 +225,7 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     if (customerCardCode && Array.isArray(plan.queries)) {
       plan.queries.forEach(q => {
         q.params = q.params || {};
-        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE'].includes(q.endpoint)) {
+        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE', 'SQL_STOK_SERI'].includes(q.endpoint)) {
           q.params.cardCode = customerCardCode;
           delete q.params.cardName;
         } else if (q.method !== 'POST' && q.method !== 'PATCH') {
@@ -558,6 +565,14 @@ async function executeQueries(sl, queries, dbName) {
           dbName,
         });
         data = rows;
+      } else if (q.endpoint === 'SQL_STOK_SERI') {
+        const rows = await getStokSeriListesi({
+          cardCode: q.params.cardCode,
+          whsCode:  q.params.whsCode,
+          top:      parseInt(q.params.top) || 200,
+          dbName,
+        });
+        data = rows;
       } else if (q.endpoint === 'SQL_HIZMET') {
         // Direkt SQL: BE1_B2BLASTHIZMETSTATUS view
         const rows = await getHizmetDurumu({
@@ -706,6 +721,27 @@ function formatResultsLocal(_question, queries, results) {
         sec.push(`${i + 1}. *${row.UrunAdi}* (${row.ItemCode})\n   Stok: ${miktar} ${row.Birim || ''} · ${row.Kategori || ''}`);
       });
       if (data.length > 15) sec.push(`_... ve ${data.length - 15} ürün daha_`);
+
+    } else if (ep === 'SQL_STOK_SERI') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nBu depoda kayıtlı ürün bulunamadı.`);
+      } else {
+        // Kalem bazlı grupla
+        const byItem = {};
+        data.forEach(row => {
+          const key = row.ItemCode;
+          if (!byItem[key]) byItem[key] = { name: row.ItemName || row.ItemCode, serials: [] };
+          if (row.DistNumber) byItem[key].serials.push(row.DistNumber);
+        });
+        const items = Object.entries(byItem);
+        const whsCode = data[0]?.WhsCode || '';
+        sec.push(`📦 *${r.description}* — Depo: ${whsCode}\n${items.length} ürün, ${data.length} seri\n`);
+        items.forEach(([itemCode, info]) => {
+          sec.push(`▸ *${itemCode}* – ${String(info.name).substring(0, 50)}`);
+          info.serials.slice(0, 8).forEach(s => sec.push(`  • ${s}`));
+          if (info.serials.length > 8) sec.push(`  _... +${info.serials.length - 8} seri_`);
+        });
+      }
 
     } else if (ep === 'SQL_HIZMET') {
       if (!data.length) {

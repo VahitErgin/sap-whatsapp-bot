@@ -307,6 +307,14 @@ function _keywordIntent(text) {
   )
     return { intent: 'crm', confidence: 0.90, reason: 'keyword' };
 
+  // Depo seri stok sorgusu
+  if (
+    /depo\s*(stoğ|stoku|listesi|sorgula|mallar)/.test(t) ||
+    /depodaki\s*(mal|ürün|stok)/.test(t) ||
+    /\b[a-z]\d+\s+depo/.test(t)
+  )
+    return { intent: 'cashflow', confidence: 0.93, reason: 'keyword-warehouse-stock' };
+
   // Servis listeleme / sorgulama (cashflow'a gitmeli)
   if (
     /(serviste|servislerde)\s*(bekleyen|açık|devam|liste)/.test(t) ||

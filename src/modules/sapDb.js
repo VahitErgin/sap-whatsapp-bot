@@ -643,6 +643,42 @@ async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Seri bazlı depo stok listesi — BE1_STOKSERILISTE_ALL view
+//
+// Parametreler:
+//   cardCode  → müşteri kodu (zorunlu)
+//   whsCode   → depo kodu, ör: "M1" (zorunlu)
+//   top       → kaç kayıt (default 200)
+// ─────────────────────────────────────────────────────────────
+async function getStokSeriListesi({ cardCode, whsCode, top = 200, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('CardCode', sql.NVarChar(50), cardCode);
+  request.input('WhsCode',  sql.NVarChar(10), whsCode);
+  request.input('Top',      sql.Int,          Number(top));
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      CardCode,
+      CardName,
+      ItemCode,
+      ItemName,
+      DistNumber,
+      DocType,
+      DocEntry,
+      DocLine,
+      WhsCode,
+      SysNumber
+    FROM BE1_STOKSERILISTE_ALL WITH(NOLOCK)
+    WHERE CardCode = @CardCode
+      AND WhsCode  = @WhsCode
+    ORDER BY ItemCode, DistNumber
+  `);
+
+  return result.recordset;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Ham SQL sorgusu çalıştır (sadece SELECT — admin zamanlanmış görevler için)
 // ─────────────────────────────────────────────────────────────
 async function runRawQuery(queryText, dbName) {
@@ -656,4 +692,4 @@ async function runRawQuery(queryText, dbName) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, runRawQuery };
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokSeriListesi, runRawQuery };
