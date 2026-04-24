@@ -17,6 +17,7 @@ const config = require('../config/config');
 const { getConnection }  = require('./sapClient');
 const { resolveCardCode } = require('./sapDb');
 const { sendText, sendButtons, sendList, downloadMedia } = require('../services/whatsappService');
+const graphService = require('../services/graphService');
 
 // ── Wizard durumu ─────────────────────────────────────────────
 const _wizard    = new Map();
@@ -357,6 +358,13 @@ async function confirmActivity(from) {
     const saved    = await sl.post('Activities', payload);
     const docEntry = saved?.DocEntry;
     console.log(`[CRM] Aktivite: ${activityData.userName} → ${activityData.cardName || '—'} (DocEntry: ${docEntry})`);
+
+    // Outlook Takvim — hata olursa sessizce geç
+    if (process.env.GRAPH_ENABLED === 'true') {
+      graphService.createCalendarEvent(activityData.userName, activityData)
+        .then(id => { if (id) console.log(`[Graph] Outlook etkinlik oluşturuldu: ${id}`); })
+        .catch(e  => console.warn('[Graph] Outlook etkinlik hatası:', e.message));
+    }
 
     const summary = [
       `🏢 ${activityData.cardName || '—'}`,

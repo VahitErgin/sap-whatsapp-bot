@@ -238,6 +238,13 @@ function writeEnv(cfg) {
     `ADMIN_PASSWORD=${cfg.ADMIN_PASSWORD}`,
     `ADMIN_SESSION_SECRET=${cfg.ADMIN_SESSION_SECRET}`,
     '',
+    '# ─── Microsoft Graph / Outlook Takvim ─────────────────────────',
+    `GRAPH_ENABLED=${cfg.GRAPH_ENABLED || 'false'}`,
+    `GRAPH_TENANT_ID=${cfg.GRAPH_TENANT_ID || ''}`,
+    `GRAPH_CLIENT_ID=${cfg.GRAPH_CLIENT_ID || ''}`,
+    `GRAPH_CLIENT_SECRET=${cfg.GRAPH_CLIENT_SECRET || ''}`,
+    `GRAPH_USER_DOMAIN=${cfg.GRAPH_USER_DOMAIN || ''}`,
+    '',
     '# ─── CRM / Oturum Ayarları ────────────────────────────────────',
     `SESSION_TIMEOUT_MINUTES=${cfg.SESSION_TIMEOUT_MINUTES}`,
     `CRM_ACTIVE_TYPES=${cfg.CRM_ACTIVE_TYPES}`,
@@ -431,9 +438,57 @@ async function main() {
   }
 
   // ══════════════════════════════════════════════════════════
-  // ADIM 8 — Windows Görev Zamanlayıcı
+  // ADIM 8 — Microsoft Graph / Outlook Takvim (isteğe bağlı)
   // ══════════════════════════════════════════════════════════
-  step(8, 'Windows Görev Zamanlayıcı (isteğe bağlı)');
+  step(8, 'Microsoft Outlook Takvim (isteğe bağlı)');
+  INFO('SAP aktiviteleri Outlook takvimine otomatik eklensin mi?');
+  INFO('Azure AD App Registration + Calendars.ReadWrite yetkisi gereklidir.');
+  console.log();
+
+  cfg.GRAPH_ENABLED      = 'false';
+  cfg.GRAPH_TENANT_ID    = '';
+  cfg.GRAPH_CLIENT_ID    = '';
+  cfg.GRAPH_CLIENT_SECRET = '';
+  cfg.GRAPH_USER_DOMAIN  = '';
+
+  if (await confirm('  Outlook entegrasyonu aktif edilsin mi?', false)) {
+    INFO('Azure Portal → App registrations → uygulamanızı seçin → Overview sekmesi');
+    console.log();
+    cfg.GRAPH_TENANT_ID     = await ask('Tenant ID (Directory ID)');
+    cfg.GRAPH_CLIENT_ID     = await ask('Client ID (Application ID)');
+    cfg.GRAPH_CLIENT_SECRET = await askSecret('Client Secret');
+    cfg.GRAPH_USER_DOMAIN   = await ask('Kullanıcı domain\'i', '@company.com');
+    console.log();
+
+    const axios = require('axios');
+    const graphOk = await tryConnect(async () => {
+      const res = await axios.post(
+        `https://login.microsoftonline.com/${cfg.GRAPH_TENANT_ID}/oauth2/v2.0/token`,
+        new URLSearchParams({
+          grant_type: 'client_credentials', client_id: cfg.GRAPH_CLIENT_ID,
+          client_secret: cfg.GRAPH_CLIENT_SECRET, scope: 'https://graph.microsoft.com/.default',
+        }),
+        { timeout: 10000, validateStatus: null }
+      );
+      if (res.status === 200 && res.data.access_token) return { ok: true };
+      return { ok: false, error: res.data?.error_description || `HTTP ${res.status}` };
+    }, '  Bilgileri düzeltip tekrar denemek ister misiniz?');
+
+    if (graphOk) {
+      cfg.GRAPH_ENABLED = 'true';
+      OK('Outlook Takvim entegrasyonu aktifleştirildi.');
+    } else {
+      WARN('Graph bağlantısı doğrulanamadı — bilgiler kaydedilecek, panelden aktif edebilirsiniz.');
+      cfg.GRAPH_ENABLED = 'false';
+    }
+  } else {
+    INFO('Outlook entegrasyonu devre dışı bırakıldı.');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // ADIM 9 — Windows Görev Zamanlayıcı
+  // ══════════════════════════════════════════════════════════
+  step(9, 'Windows Görev Zamanlayıcı (isteğe bağlı)');
   INFO('Bot, Windows başladığında otomatik başlasın mı?');
   INFO('Bu adım yönetici (Administrator) yetkisi gerektirir.');
   console.log();

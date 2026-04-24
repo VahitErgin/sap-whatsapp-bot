@@ -233,6 +233,70 @@
         </div>
       </div>
 
+      <!-- Microsoft Graph / Outlook Takvim -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-calendar-check me-1" style="color:#0078d4"></i>
+            <span>Microsoft Outlook Takvim (Graph API)</span>
+            <span class="badge bg-secondary ms-auto small" id="graphBadge">Pasif</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              SAP'a kaydedilen her aktivite eş zamanlı olarak kullanıcının Outlook takvimine eklenir.
+              Azure AD'de <strong>Calendars.ReadWrite</strong> uygulama izni (Application permission) gereklidir.
+            </p>
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="graphEnabled">
+                  <label class="form-check-label fw-semibold small" for="graphEnabled">Outlook Takvim Entegrasyonu Aktif</label>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">Tenant ID</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="graphTenantId"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                <div class="form-text">Azure Portal → Azure Active Directory → Tenant ID</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">Client ID (Application ID)</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="graphClientId"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                <div class="form-text">Azure Portal → App registrations → Application (client) ID</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">
+                  Client Secret <span class="text-muted fw-normal">(boş bırakırsan değişmez)</span>
+                </label>
+                <div class="input-group input-group-sm">
+                  <input type="password" class="form-control" id="graphClientSecret" placeholder="••••••••">
+                  <button class="btn btn-outline-secondary" type="button" onclick="toggleVis('graphClientSecret',this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+                <div class="form-text" id="graphSecretStatus"></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">Kullanıcı Domain'i</label>
+                <input type="text" class="form-control form-control-sm" id="graphUserDomain"
+                  placeholder="@company.com">
+                <div class="form-text">SAP kullanıcı kodu + domain = Outlook e-posta adresi</div>
+              </div>
+              <div class="col-12 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-primary btn-sm" onclick="saveGraphSettings()">
+                  <i class="bi bi-floppy me-1"></i>Graph Ayarlarını Kaydet
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="testGraph()" id="graphTestBtn">
+                  <i class="bi bi-play-circle me-1"></i>Bağlantıyı Test Et
+                </button>
+                <span id="graphTestResult"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- CRM & Oturum Ayarları -->
       <div class="col-12">
         <div class="card">
@@ -750,9 +814,66 @@ async function deleteLangPref(phone) {
   loadLangSettings();
 }
 
+async function loadGraphSettings() {
+  try {
+    const res  = await fetch('/admin/api/graph-settings');
+    const data = await res.json();
+    document.getElementById('graphEnabled').checked    = !!data.GRAPH_ENABLED;
+    document.getElementById('graphTenantId').value     = data.GRAPH_TENANT_ID   || '';
+    document.getElementById('graphClientId').value     = data.GRAPH_CLIENT_ID   || '';
+    document.getElementById('graphUserDomain').value   = data.GRAPH_USER_DOMAIN || '';
+    document.getElementById('graphSecretStatus').textContent =
+      data.GRAPH_SECRET_SET ? '✓ Secret kayıtlı (değiştirmek için yeni secret gir)' : '⚠ Client Secret tanımlı değil';
+    document.getElementById('graphBadge').textContent  = data.GRAPH_ENABLED ? 'Aktif' : 'Pasif';
+    document.getElementById('graphBadge').className    = 'badge ms-auto small ' + (data.GRAPH_ENABLED ? 'bg-success' : 'bg-secondary');
+  } catch { /* yoksay */ }
+}
+
+async function saveGraphSettings() {
+  const body = {
+    GRAPH_ENABLED:     document.getElementById('graphEnabled').checked,
+    GRAPH_TENANT_ID:   document.getElementById('graphTenantId').value.trim(),
+    GRAPH_CLIENT_ID:   document.getElementById('graphClientId').value.trim(),
+    GRAPH_USER_DOMAIN: document.getElementById('graphUserDomain').value.trim(),
+  };
+  const secret = document.getElementById('graphClientSecret').value.trim();
+  if (secret) body.GRAPH_CLIENT_SECRET = secret;
+
+  const res  = await fetch('/admin/api/graph-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showAlert('Microsoft Graph ayarları kaydedildi');
+    document.getElementById('graphClientSecret').value = '';
+    loadGraphSettings();
+  } else {
+    showAlert(data.error || 'Hata', 'danger');
+  }
+}
+
+async function testGraph() {
+  const btn    = document.getElementById('graphTestBtn');
+  const result = document.getElementById('graphTestResult');
+  btn.disabled = true;
+  result.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const res  = await fetch('/admin/api/graph-test', { method: 'POST' });
+    const data = await res.json();
+    result.innerHTML = data.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Azure AD bağlantısı başarılı</span>'
+      : `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${data.error}</span>`;
+  } catch {
+    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Sunucuya erişilemedi</span>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 loadSettings();
 loadEdocSettings();
 loadLangSettings();
+loadGraphSettings();
 </script>
 </body>
 </html>

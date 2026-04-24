@@ -13,6 +13,7 @@ const { readLogs }                         = require('../services/logService');
 const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('../services/taskService');
 const { getEdocConfig, saveEdocConfig } = require('../services/edocumentService');
 const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
+const { testConnection: graphTestConnection } = require('../services/graphService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -325,6 +326,43 @@ router.post('/api/lang-settings', requireAuth, (req, res) => {
 router.delete('/api/lang-settings/:phone', requireAuth, (req, res) => {
   deleteLang(req.params.phone);
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Microsoft Graph / Outlook Takvim
+// ─────────────────────────────────────────────────────────────
+router.get('/api/graph-settings', requireAuth, (_req, res) => {
+  res.json({
+    GRAPH_ENABLED:      process.env.GRAPH_ENABLED      === 'true',
+    GRAPH_TENANT_ID:    process.env.GRAPH_TENANT_ID    || '',
+    GRAPH_CLIENT_ID:    process.env.GRAPH_CLIENT_ID    || '',
+    GRAPH_SECRET_SET:   !!(process.env.GRAPH_CLIENT_SECRET || ''),
+    GRAPH_USER_DOMAIN:  process.env.GRAPH_USER_DOMAIN  || '',
+  });
+});
+
+router.post('/api/graph-settings', requireAuth, (req, res) => {
+  const { GRAPH_ENABLED, GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, GRAPH_USER_DOMAIN } = req.body || {};
+  const updates = {};
+  if (GRAPH_ENABLED    !== undefined)        updates.GRAPH_ENABLED      = GRAPH_ENABLED ? 'true' : 'false';
+  if (GRAPH_TENANT_ID  !== undefined)        updates.GRAPH_TENANT_ID    = GRAPH_TENANT_ID;
+  if (GRAPH_CLIENT_ID  !== undefined)        updates.GRAPH_CLIENT_ID    = GRAPH_CLIENT_ID;
+  if (GRAPH_CLIENT_SECRET)                   updates.GRAPH_CLIENT_SECRET = GRAPH_CLIENT_SECRET;
+  if (GRAPH_USER_DOMAIN !== undefined)       updates.GRAPH_USER_DOMAIN  = GRAPH_USER_DOMAIN;
+
+  updateEnv(updates);
+  for (const [k, v] of Object.entries(updates)) process.env[k] = v;
+
+  res.json({ ok: true });
+});
+
+router.post('/api/graph-test', requireAuth, async (_req, res) => {
+  try {
+    const result = await graphTestConnection();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────

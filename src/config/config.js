@@ -37,6 +37,14 @@ module.exports = {
     password: process.env.SAP_DB_PASSWORD || '',
   },
 
+  graph: {
+    tenantId:     process.env.GRAPH_TENANT_ID     || '',
+    clientId:     process.env.GRAPH_CLIENT_ID     || '',
+    clientSecret: process.env.GRAPH_CLIENT_SECRET || '',
+    userDomain:   process.env.GRAPH_USER_DOMAIN   || '',
+    enabled:      process.env.GRAPH_ENABLED === 'true',
+  },
+
   // Satın alma onayı yapabilecek telefon numaraları (başında ülke kodu, + yok)
   approverPhones: (process.env.APPROVER_PHONES || '').split(',').map(p => p.trim()).filter(Boolean),
 
