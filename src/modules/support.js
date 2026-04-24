@@ -108,17 +108,16 @@ async function askClaude(question) {
   const response = await axios.post(
     'https://api.anthropic.com/v1/messages',
     {
-      model:      'claude-sonnet-4-6',
+      model:      'claude-haiku-4-5-20251001',  // Sonnet → Haiku: destek açıklamaları için yeterli, ~20x ucuz
       max_tokens: 1024,
-      system:     SYSTEM_PROMPT,
-      messages: [
-        { role: 'user', content: question }
-      ],
+      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: question }],
     },
     {
       headers: {
         'x-api-key':         config.anthropic.apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta':    'prompt-caching-2024-07-31',
         'content-type':      'application/json',
       },
     }

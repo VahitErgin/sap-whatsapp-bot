@@ -366,13 +366,14 @@ async function _claudeIntent(text) {
       {
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 80,
-        system:     INTENT_SYSTEM,
+        system: [{ type: 'text', text: INTENT_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages:   [{ role: 'user', content: text }],
       },
       {
         headers: {
           'x-api-key':         config.anthropic.apiKey,
           'anthropic-version': '2023-06-01',
+          'anthropic-beta':    'prompt-caching-2024-07-31',
           'content-type':      'application/json',
         },
         timeout: 10000,

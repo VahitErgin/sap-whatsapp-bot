@@ -207,6 +207,24 @@ function fmtMoney(val, currency) {
 // ─── Çoklu cari seçimi için bekleyen sorgular (5 dakika TTL) ─
 const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt }
 
+// ─── Sorgu sonuç cache'i (2 dk TTL) ──────────────────────────
+// Aynı kullanıcının aynı sorusunu tekrar Claude+SAP'a göndermez.
+const _resultCache = new Map();
+const _CACHE_TTL   = 2 * 60 * 1000;
+const _CACHE_MAX   = 300;
+
+function _cacheKey(from, q)  { return `${from}::${q.trim().toLowerCase()}`; }
+function _cacheGet(from, q) {
+  const hit = _resultCache.get(_cacheKey(from, q));
+  return (hit && Date.now() - hit.ts < _CACHE_TTL) ? hit.text : null;
+}
+function _cacheSet(from, q, text) {
+  if (_resultCache.size >= _CACHE_MAX) _resultCache.delete(_resultCache.keys().next().value);
+  _resultCache.set(_cacheKey(from, q), { text, ts: Date.now() });
+}
+// "yenile / güncelle / taze / refresh" içeriyorsa cache atlanır
+function _bypassCache(q) { return /yenile|güncelle|taze|refresh/i.test(q); }
+
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
@@ -218,6 +236,16 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
   }
 
   console.log(`[Cashflow] Sorgu (${from}): ${question}`);
+
+  // Cache kontrolü — yenileme isteği veya cari-seçim sonrası atla
+  if (!_skipFallback && !_bypassCache(question)) {
+    const hit = _cacheGet(from, question);
+    if (hit) {
+      console.log(`[Cashflow] Cache hit → ${from}`);
+      return await sendText(from, hit);
+    }
+  }
+
   await sendText(from, '⏳ SAP sorgulanıyor...');
 
   try {
@@ -309,6 +337,7 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
 
     // 5. Sonuçları formatla
     const formatted = formatResultsLocal(question, plan.queries, results);
+    if (!_skipFallback) _cacheSet(from, question, formatted);
     await sendText(from, formatted);
 
   } catch (err) {
@@ -387,15 +416,17 @@ async function buildQueryPlan(question, retries = 2) {
       const response = await axios.post(
         'https://api.anthropic.com/v1/messages',
         {
-          model:      'claude-haiku-4-5-20251001',  // Planlama için Haiku yeterli
+          model:      'claude-haiku-4-5-20251001',
           max_tokens: 512,
-          system:     QUERY_PLANNER_PROMPT,
+          // system dizi formatında — büyük dokümanlar (SAP context + scenarios) cache'lenir
+          system: [{ type: 'text', text: QUERY_PLANNER_PROMPT, cache_control: { type: 'ephemeral' } }],
           messages: [{ role: 'user', content: question }],
         },
         {
           headers: {
             'x-api-key':         config.anthropic.apiKey,
             'anthropic-version': '2023-06-01',
+            'anthropic-beta':    'prompt-caching-2024-07-31',
             'content-type':      'application/json',
           },
           timeout: 30000,
