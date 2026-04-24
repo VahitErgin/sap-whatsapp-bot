@@ -11,7 +11,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const { sendText }           = require('./whatsappService');
+const { sendText, sendTemplate } = require('./whatsappService');
 const { getOnayBekleyenler, getVadesiGecenler, getCustomerByPhone, runRawQuery } = require('../modules/sapDb');
 
 const TASKS_FILE = path.join(__dirname, '../../data/scheduled-tasks.json');
@@ -44,7 +44,7 @@ function saveTasks(tasks) {
   fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2), 'utf8');
 }
 
-function createTask({ name, type, time, phones, query, enabled = true }) {
+function createTask({ name, type, time, phones, query, enabled = true, templateName, templateLang }) {
   if (!TASK_TYPES[type])  throw new Error('Geçersiz görev tipi');
   if (!/^\d{2}:\d{2}$/.test(time)) throw new Error('Saat HH:MM formatında olmalı');
   if (!phones?.length)    throw new Error('En az bir telefon numarası gerekli');
@@ -60,6 +60,7 @@ function createTask({ name, type, time, phones, query, enabled = true }) {
     enabled:   Boolean(enabled),
     createdAt: new Date().toISOString(),
     ...(type === 'custom_query' ? { query: query.trim() } : {}),
+    ...(templateName ? { templateName, templateLang: templateLang || 'tr' } : {}),
   };
   tasks.push(task);
   saveTasks(tasks);
@@ -78,7 +79,13 @@ function updateTask(id, updates) {
     throw new Error('SQL sorgusu gerekli');
   }
 
-  tasks[idx] = { ...tasks[idx], ...updates, id };
+  const merged = { ...tasks[idx], ...updates, id };
+  // Şablon kaldırıldıysa (boş string geldi) alanı sil
+  if (updates.templateName === '') {
+    delete merged.templateName;
+    delete merged.templateLang;
+  }
+  tasks[idx] = merged;
   saveTasks(tasks);
   return tasks[idx];
 }
@@ -94,7 +101,18 @@ function deleteTask(id) {
 // ─────────────────────────────────────────────────────────────
 // Görev çalıştırıcılar
 // ─────────────────────────────────────────────────────────────
-async function runPendingApprovals(phone) {
+
+// Şablon seçiliyse sendTemplate, yoksa sendText kullan.
+// components: Meta template body parametreleri dizisi — [{ type:'text', text:'...' }, ...]
+async function _dispatch(phone, task, text, components) {
+  if (task.templateName) {
+    await sendTemplate(phone, task.templateName, task.templateLang || 'tr', components);
+  } else {
+    await sendText(phone, text);
+  }
+}
+
+async function runPendingApprovals(phone, task) {
   const phone10 = phone.slice(-10);
   const all     = await getOnayBekleyenler();
   const mine    = all.filter(r => String(r.OnaylayanTelefon || '').replace(/\D/g, '').slice(-10) === phone10);
@@ -106,25 +124,25 @@ async function runPendingApprovals(phone) {
   );
   if (mine.length > 5) lines.push(`+ ${mine.length - 5} belge daha...`);
 
-  await sendText(phone,
-    `📋 *Bekleyen Onaylarınız* (${mine.length} adet)\n\n${lines.join('\n')}\n\n` +
-    `_Detay için "bekleyen onaylar" yazın._`
-  );
+  const text = `📋 *Bekleyen Onaylarınız* (${mine.length} adet)\n\n${lines.join('\n')}\n\n_Detay için "bekleyen onaylar" yazın._`;
+  // Şablon parametreleri: {{1}} = adet, {{2}} = belge listesi
+  const components = [
+    { type: 'text', text: String(mine.length) },
+    { type: 'text', text: lines.join('\n') },
+  ];
+  await _dispatch(phone, task, text, components);
 }
 
-async function runOverdueBalances(phone) {
-  const today = new Date().toISOString().split('T')[0];
-  // Telefona göre müşteri bul
+async function runOverdueBalances(phone, task) {
+  const today   = new Date().toISOString().split('T')[0];
   const phone10 = phone.slice(-10);
-  const bp = await getCustomerByPhone(phone10).catch(() => null);
+  const bp      = await getCustomerByPhone(phone10).catch(() => null);
 
   let rows;
   if (bp?.CardCode) {
-    // Müşterinin kendi bakiyesi
     const data = await getVadesiGecenler({ refDate: today, cardType: 'C' });
     rows = data.filter(r => r.CardCode === bp.CardCode);
   } else {
-    // Genel rapor — ilk 5 müşteri
     rows = (await getVadesiGecenler({ refDate: today, cardType: 'C' })).slice(0, 5);
   }
 
@@ -133,15 +151,22 @@ async function runOverdueBalances(phone) {
   const lines = rows.map(r =>
     `• ${r.CardName || r.CardCode}: ${_fmt(r.BakiyeTRY)} TRY`
   );
-  await sendText(phone,
-    `💰 *Vadesi Yaklaşan Bakiyeler*\n\n${lines.join('\n')}`
-  );
+  const text = `💰 *Vadesi Yaklaşan Bakiyeler*\n\n${lines.join('\n')}`;
+  // Şablon parametreleri: {{1}} = müşteri/kişi sayısı, {{2}} = bakiye listesi
+  const components = [
+    { type: 'text', text: String(rows.length) },
+    { type: 'text', text: lines.join('\n') },
+  ];
+  await _dispatch(phone, task, text, components);
 }
 
 async function runCustomQuery(phone, task) {
   const rows = await runRawQuery(task.query);
   if (!rows.length) {
-    await sendText(phone, `📊 *${task.name}*\n\nSorgu sonucu boş döndü.`);
+    await _dispatch(phone, task,
+      `📊 *${task.name}*\n\nSorgu sonucu boş döndü.`,
+      [{ type: 'text', text: task.name }, { type: 'text', text: 'Sonuç bulunamadı.' }]
+    );
     return;
   }
 
@@ -151,15 +176,18 @@ async function runCustomQuery(phone, task) {
     cols.map(c => `${c}: ${r[c] ?? '—'}`).join(' | ')
   );
   const footer = rows.length > 10 ? `\n_...toplam ${rows.length} kayıt, ilk 10 gösteriliyor_` : '';
-
-  await sendText(phone,
-    `📊 *${task.name}*\n\n${lines.join('\n')}${footer}`
-  );
+  const text   = `📊 *${task.name}*\n\n${lines.join('\n')}${footer}`;
+  // Şablon parametreleri: {{1}} = görev adı, {{2}} = sorgu sonucu (ilk 10 satır)
+  const components = [
+    { type: 'text', text: task.name },
+    { type: 'text', text: lines.join('\n') + (footer || '') },
+  ];
+  await _dispatch(phone, task, text, components);
 }
 
-async function runPlaceholder(phone, taskName) {
+async function runPlaceholder(phone, task) {
   await sendText(phone,
-    `📊 *${taskName}* raporu hazırlanıyor.\n\nBu rapor tipi yakında aktif olacaktır.`
+    `📊 *${task.name}* raporu hazırlanıyor.\n\nBu rapor tipi yakında aktif olacaktır.`
   );
 }
 
@@ -167,10 +195,10 @@ async function runTask(task) {
   for (const phone of task.phones) {
     try {
       switch (task.type) {
-        case 'pending_approvals': await runPendingApprovals(phone); break;
-        case 'overdue_balances':  await runOverdueBalances(phone);  break;
-        case 'custom_query':      await runCustomQuery(phone, task); break;
-        default:                  await runPlaceholder(phone, task.name); break;
+        case 'pending_approvals': await runPendingApprovals(phone, task); break;
+        case 'overdue_balances':  await runOverdueBalances(phone, task);  break;
+        case 'custom_query':      await runCustomQuery(phone, task);      break;
+        default:                  await runPlaceholder(phone, task);      break;
       }
       console.log(`[Scheduler] ✓ ${task.name} → ${phone}`);
     } catch (err) {
