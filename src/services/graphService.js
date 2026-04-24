@@ -64,7 +64,12 @@ async function createCalendarEvent(sapUserCode, activityData) {
     'Email':      'SAP E-posta',
   };
 
-  const startDt = new Date();
+  const dateStr  = activityData.activityDate || new Date().toISOString().split('T')[0];
+  const timeStr  = activityData.activityTime || (() => {
+    const n = new Date();
+    return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  })();
+  const startDt = new Date(`${dateStr}T${timeStr}:00`);
   const endDt   = new Date(startDt.getTime() + 30 * 60 * 1000);
 
   function toLocalIso(dt) {

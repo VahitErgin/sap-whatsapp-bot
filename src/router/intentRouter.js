@@ -28,7 +28,7 @@ const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaiti
 const {
   handleCreateActivity, handleWizardInput,
   handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
-  handleWizardFirmSelection,
+  handleWizardFirmSelection, handleWizardDateSelection, handleWizardTimeSelection,
   getWizardState, confirmActivity, skipLocation,
   handleMediaAttachment, cancelAttachment,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
@@ -150,6 +150,12 @@ async function handleIncoming({ from, text }) {
     }
     if (text.startsWith('ACT_SUB:')) {
       return await handleWizardSubjectSelection(from, text.replace('ACT_SUB:', '').trim());
+    }
+    if (text.startsWith('ACT_DATE:')) {
+      return await handleWizardDateSelection(from, text.replace('ACT_DATE:', '').trim());
+    }
+    if (text.startsWith('ACT_TIME:')) {
+      return await handleWizardTimeSelection(from, text.replace('ACT_TIME:', '').trim());
     }
 
     // ── 4. Wizard modu ───────────────────────────────────────

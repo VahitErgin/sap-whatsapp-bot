@@ -166,6 +166,24 @@ async function handleWizardInput(from, text) {
 
   } else if (state.step === 'note') {
     state.notes = text.trim();
+    await _askDate(from, state);
+  } else if (state.step === 'date') {
+    const parsed = _parseDate(text.trim());
+    if (!parsed) {
+      await sendText(from, '⚠️ Geçersiz tarih formatı.\nÖrnek: *15.06.2025* veya aşağıdaki butonlardan seçin.');
+      return;
+    }
+    state.activityDate = parsed;
+    _wizard.set(_norm(from), state);
+    await _askTime(from, state);
+  } else if (state.step === 'time') {
+    const parsed = _parseTime(text.trim());
+    if (!parsed) {
+      await sendText(from, '⚠️ Geçersiz saat formatı.\nÖrnek: *14:30* veya aşağıdaki butondan seçin.');
+      return;
+    }
+    state.activityTime = parsed;
+    _wizard.set(_norm(from), state);
     await _askLocation(from, state);
   } else if (state.step === 'location') {
     // Kullanıcı metin yazdı, buton hatırlat
@@ -350,6 +368,14 @@ async function confirmActivity(from) {
       Notes:        (activityData.notes || '') + locNote,
     };
 
+    if (activityData.activityTime) {
+      const [h, m] = activityData.activityTime.split(':').map(Number);
+      const startMin = h * 60 + m;
+      const endMin   = startMin + 30;
+      payload.StartTime = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`;
+      payload.EndTime   = `${String(Math.floor(endMin / 60) % 24).padStart(2,'0')}:${String(endMin % 60).padStart(2,'0')}:00`;
+    }
+
     if (activityData.cardCode)     payload.CardCode         = activityData.cardCode;
     if (activityData.activityType) payload.ActivityType     = Number(activityData.activityType);
     if (activityData.subjectCode)  payload.ActivitySubject  = Number(activityData.subjectCode);
@@ -366,9 +392,10 @@ async function confirmActivity(from) {
         .catch(e  => console.warn('[Graph] Outlook etkinlik hatası:', e.message));
     }
 
+    const dateLabel = `${_isoToTR(activityData.activityDate)}${activityData.activityTime ? ' ' + activityData.activityTime : ''}`;
     const summary = [
       `🏢 ${activityData.cardName || '—'}`,
-      `📋 ${activityData.action} · ${activityData.activityDate}`,
+      `📋 ${activityData.action} · ${dateLabel}`,
       activityData.notes ? `📝 ${activityData.notes}` : '',
       loc ? `📍 ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}` : '',
     ].filter(Boolean).join('\n');
@@ -446,6 +473,74 @@ async function _sendSubjectList(from, subjects) {
   await sendList(from, '📌 Konu Seçin', 'Aktivite konusunu seçin:', 'Konu Seç', [{ title: 'Konular', rows }]);
 }
 
+async function _askDate(from, state) {
+  state.step = 'date';
+  _wizard.set(_norm(from), state);
+  const today    = _isoToTR(new Date().toISOString().split('T')[0]);
+  const tomorrowDt = new Date(Date.now() + 86400000);
+  const tomorrow = _isoToTR(tomorrowDt.toISOString().split('T')[0]);
+  await sendButtons(from,
+    '📅 Aktivite Tarihi',
+    `Aktivitenin gerçekleşeceği tarihi seçin.\n_Farklı bir tarih için DD.MM.YYYY formatında yazabilirsiniz._`,
+    [
+      { id: 'ACT_DATE:today',    title: `Bugün (${today})`   },
+      { id: 'ACT_DATE:tomorrow', title: `Yarın (${tomorrow})` },
+      { id: 'ACT_DATE:custom',   title: '✏️ Başka Tarih Gir'  },
+    ]
+  );
+}
+
+async function _askTime(from, state) {
+  state.step = 'time';
+  _wizard.set(_norm(from), state);
+  const now = new Date();
+  const hh  = String(now.getHours()).padStart(2, '0');
+  const mm  = String(now.getMinutes()).padStart(2, '0');
+  await sendButtons(from,
+    '🕐 Aktivite Saati',
+    `Saati seçin ya da SS:DD formatında yazın.\n_Seçilen tarih: ${_isoToTR(state.activityDate)}_`,
+    [
+      { id: `ACT_TIME:now`,    title: `Şimdi (${hh}:${mm})` },
+      { id: 'ACT_TIME:custom', title: '✏️ Saat Gir'           },
+    ]
+  );
+}
+
+async function handleWizardDateSelection(from, option) {
+  const state = getWizardState(from);
+  if (!state) return;
+  _refreshTTL(from, state);
+
+  if (option === 'today') {
+    state.activityDate = new Date().toISOString().split('T')[0];
+    _wizard.set(_norm(from), state);
+    await _askTime(from, state);
+  } else if (option === 'tomorrow') {
+    state.activityDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    _wizard.set(_norm(from), state);
+    await _askTime(from, state);
+  } else {
+    // custom → kullanıcı yazacak, step 'date' kalır
+    await sendText(from, '📅 Tarihi yazın:\n_Örnek: 15.06.2025_');
+  }
+}
+
+async function handleWizardTimeSelection(from, option) {
+  const state = getWizardState(from);
+  if (!state) return;
+  _refreshTTL(from, state);
+
+  if (option === 'now') {
+    const now = new Date();
+    state.activityTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    _wizard.set(_norm(from), state);
+    await _askLocation(from, state);
+  } else {
+    // custom → kullanıcı yazacak, step 'time' kalır
+    await sendText(from, '🕐 Saati yazın:\n_Örnek: 14:30_');
+  }
+}
+
 async function _askLocation(from, state) {
   state.step = 'location';
   _wizard.set(_norm(from), state);
@@ -458,7 +553,9 @@ async function _askLocation(from, state) {
 }
 
 async function _showSummary(from, state) {
-  const today = new Date().toISOString().split('T')[0];
+  const activityDate = state.activityDate || new Date().toISOString().split('T')[0];
+  const activityTime = state.activityTime || null;
+
   const catName = state.activityType
     ? (state.actTypes.find(t => String(t.Code) === String(state.activityType))?.Name || state.activityType)
     : null;
@@ -474,11 +571,14 @@ async function _showSummary(from, state) {
     activityType: state.activityType,
     subjectCode:  state.subjectCode,
     notes:        state.notes,
-    activityDate: today,
+    activityDate,
+    activityTime,
     employeeId:   state.session.employeeId,
     userName:     state.session.userName,
     location:     loc || null,
   };
+
+  const dateLabel = `${_isoToTR(activityDate)}${activityTime ? ' ' + activityTime : ''}`;
 
   const summary = [
     `👤 *Kullanıcı:* ${state.session.userName}`,
@@ -486,7 +586,7 @@ async function _showSummary(from, state) {
     `📋 *Tip:* ${activityData.action}`,
     catName ? `🗂 *Tür:* ${catName}` : '',
     subName ? `📌 *Konu:* ${subName}` : '',
-    `📅 *Tarih:* ${today}`,
+    `📅 *Tarih:* ${dateLabel}`,
     `📝 *Not:* ${activityData.notes}`,
     loc ? `📍 *Konum:* ${loc.latitude}, ${loc.longitude}${loc.name ? ' – ' + loc.name : ''}` : '',
   ].filter(Boolean).join('\n');
@@ -531,6 +631,30 @@ function _refreshTTL(from, state) {
 
 function _norm(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
+}
+
+// DD.MM.YYYY / DD/MM/YYYY / YYYY-MM-DD → YYYY-MM-DD
+function _parseDate(input) {
+  let m = input.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  m = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return input;
+  return null;
+}
+
+// SS:DD → SS:DD (doğrulama ile)
+function _parseTime(input) {
+  const m = input.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+}
+
+// YYYY-MM-DD → DD.MM.YYYY
+function _isoToTR(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -684,6 +808,8 @@ module.exports = {
   handleWizardCategorySelection,
   handleWizardSubjectSelection,
   handleWizardFirmSelection,
+  handleWizardDateSelection,
+  handleWizardTimeSelection,
   getWizardState,
   handleWizardLocation,
   skipLocation,
