@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokSeriListesi } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi } = require('./sapDb');
 const { sendText, sendList }         = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -147,6 +147,16 @@ Müşteriye ait seri bazlı depo stok listesi (BE1_STOKSERILISTE_ALL):
   cardCode zorunlu — kullanıcının kendi kodu (sistem otomatik kilitler)
   whsCode zorunlu — kullanıcının mesajından çıkar (M1, M2, vs.)
   → Kullanım: "M1 depo stoğum", "depodaki mallarım", "M1 warehouse stoğu", "depo stok listesi M1"
+
+Stokta olan ürünlerin fiyat listesi (OITM + OITW + ITM1):
+  endpoint: "SQL_STOK_FIYAT"
+  params: { "filter": "AMD", "priceList": "1", "top": "30" }
+  filter: ürün adı / marka / ItemCode içindeki arama terimi (ör: "AMD", "SAMSUNG", "NOTEBOOK")
+  priceList: fiyat listesi numarası — belirtilmezse 1 kullan
+  top: kaç kayıt — varsayılan 30
+  → Kullanım: "AMD fiyat listesi", "AMD ürünleri fiyatı", "stokta olan ürünler fiyatıyla",
+              "fiyat listesi", "hangi ürünler var fiyatıyla", "stok fiyatları"
+  KRİTİK: Items endpoint KULLANMA — fiyat için SAP SL Items'da Price alanı yoktur, $expand desteklenmez
 
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
@@ -565,6 +575,14 @@ async function executeQueries(sl, queries, dbName) {
           dbName,
         });
         data = rows;
+      } else if (q.endpoint === 'SQL_STOK_FIYAT') {
+        const rows = await getStokFiyatListesi({
+          filter:    q.params.filter    || '',
+          priceList: parseInt(q.params.priceList) || 1,
+          top:       parseInt(q.params.top)       || 30,
+          dbName,
+        });
+        data = rows;
       } else if (q.endpoint === 'SQL_STOK_SERI') {
         const rows = await getStokSeriListesi({
           cardCode: q.params.cardCode,
@@ -721,6 +739,24 @@ function formatResultsLocal(_question, queries, results) {
         sec.push(`${i + 1}. *${row.UrunAdi}* (${row.ItemCode})\n   Stok: ${miktar} ${row.Birim || ''} · ${row.Kategori || ''}`);
       });
       if (data.length > 15) sec.push(`_... ve ${data.length - 15} ürün daha_`);
+
+    } else if (ep === 'SQL_STOK_FIYAT') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nStokta eşleşen ürün bulunamadı.`);
+      } else {
+        sec.push(`🏷 *${r.description}* (${r.count} ürün)\n`);
+        data.forEach(row => {
+          const stok   = parseFloat(row.StokMiktar || 0).toLocaleString('tr-TR');
+          const fiyat  = parseFloat(row.Fiyat || 0);
+          const fiyatS = fiyat > 0 ? fmtMoney(fiyat, row.FiyatPB !== 'TRY' ? row.FiyatPB : null) : '—';
+          const marka  = row.Marka ? ` [${row.Marka}]` : '';
+          sec.push(
+            `▸ *${row.ItemCode}*${marka}\n` +
+            `  ${String(row.ItemName).substring(0, 55)}\n` +
+            `  Stok: ${stok} ${row.Birim || ''} · Fiyat: *${fiyatS}*`
+          );
+        });
+      }
 
     } else if (ep === 'SQL_STOK_SERI') {
       if (!data.length) {

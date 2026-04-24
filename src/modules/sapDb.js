@@ -643,6 +643,50 @@ async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Stokta olan ürünlerin fiyat listesi — OITM + OITW + ITM1
+//
+// Parametreler:
+//   filter     → ItemName / Marka / ItemCode içeren metin (ör: "AMD")
+//   priceList  → Fiyat listesi numarası (default 1)
+//   top        → Kaç kayıt (default 30)
+// ─────────────────────────────────────────────────────────────
+async function getStokFiyatListesi({ filter, priceList = 1, top = 30, dbName }) {
+  const pool    = await getPool(dbName);
+  const request = pool.request();
+  request.input('Filter',    sql.NVarChar(100), `%${filter || ''}%`);
+  request.input('PriceList', sql.Int,           Number(priceList) || 1);
+  request.input('Top',       sql.Int,           Number(top)       || 30);
+
+  const result = await request.query(`
+    SELECT TOP (@Top)
+      i.ItemCode,
+      i.ItemName,
+      ISNULL(i.U_BE1_MARKAKODU, '')    AS Marka,
+      SUM(ISNULL(w.OnHand, 0))         AS StokMiktar,
+      i.SalUnitMsr                     AS Birim,
+      ISNULL(p.Price, 0)               AS Fiyat,
+      ISNULL(p.Currency, 'TRY')        AS FiyatPB
+    FROM OITM i WITH(NOLOCK)
+    LEFT JOIN OITW w WITH(NOLOCK) ON i.ItemCode   = w.ItemCode
+    LEFT JOIN ITM1 p WITH(NOLOCK) ON i.ItemCode   = p.ItemCode
+                                 AND p.PriceList  = @PriceList
+    WHERE i.InvntItem = 'Y'
+      AND i.Canceled  = 'N'
+      AND i.validFor  = 'Y'
+      AND (
+        i.ItemName          LIKE @Filter
+        OR i.ItemCode       LIKE @Filter
+        OR ISNULL(i.U_BE1_MARKAKODU, '') LIKE @Filter
+      )
+    GROUP BY i.ItemCode, i.ItemName, i.U_BE1_MARKAKODU, i.SalUnitMsr, p.Price, p.Currency
+    HAVING SUM(ISNULL(w.OnHand, 0)) > 0
+    ORDER BY i.ItemName
+  `);
+
+  return result.recordset;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Seri bazlı depo stok listesi — BE1_STOKSERILISTE_ALL view
 //
 // Parametreler:
@@ -692,4 +736,4 @@ async function runRawQuery(queryText, dbName) {
   return result.recordset;
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokSeriListesi, runRawQuery };
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, runRawQuery };
