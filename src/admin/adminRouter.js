@@ -211,6 +211,7 @@ router.get('/api/settings', requireAuth, (req, res) => {
     ATTACHMENT_MAX_MB:       env.ATTACHMENT_MAX_MB         || '5',
     // Bildirim & Diğer
     SERVIS_NOTIF_TEMPLATE:   env.SERVIS_NOTIF_TEMPLATE     || '',
+    STOCK_PRICE_LIST:        env.STOCK_PRICE_LIST           || '1',
     // Admin
     ADMIN_USERNAME:          getAdminCfg().username        || 'admin',
   });
@@ -223,7 +224,7 @@ router.post('/api/settings', requireAuth, (req, res) => {
     'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
     'SAP_DB_SERVER', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
     'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',
-    'SERVIS_NOTIF_TEMPLATE',
+    'SERVIS_NOTIF_TEMPLATE', 'STOCK_PRICE_LIST',
   ];
   const sensitiveKeys = new Set(['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'SAP_PASSWORD', 'SAP_DB_PASSWORD']);
   const updates = {};
@@ -257,6 +258,7 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.CRM_ACTIVE_SUBJECTS !== undefined) process.env.CRM_ACTIVE_SUBJECTS = updates.CRM_ACTIVE_SUBJECTS;
   if (updates.ATTACHMENT_MAX_MB !== undefined)   process.env.ATTACHMENT_MAX_MB   = updates.ATTACHMENT_MAX_MB;
   if (updates.SERVIS_NOTIF_TEMPLATE !== undefined) process.env.SERVIS_NOTIF_TEMPLATE = updates.SERVIS_NOTIF_TEMPLATE;
+  if (updates.STOCK_PRICE_LIST !== undefined)      process.env.STOCK_PRICE_LIST      = updates.STOCK_PRICE_LIST;
 
   res.json({ ok: true });
 });

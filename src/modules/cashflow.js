@@ -578,7 +578,7 @@ async function executeQueries(sl, queries, dbName) {
       } else if (q.endpoint === 'SQL_STOK_FIYAT') {
         const rows = await getStokFiyatListesi({
           filter:    q.params.filter    || '',
-          priceList: parseInt(q.params.priceList) || 1,
+          priceList: parseInt(q.params.priceList || process.env.STOCK_PRICE_LIST || '1'),
           top:       parseInt(q.params.top)       || 30,
           dbName,
         });

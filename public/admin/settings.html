@@ -409,6 +409,12 @@
                 placeholder="servis_durum_guncelleme">
               <div class="form-text">Meta Business Manager'da onaylı WhatsApp template adı</div>
             </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold small">Varsayılan Fiyat Listesi No</label>
+              <input type="number" class="form-control form-control-sm" id="stockPriceList"
+                min="1" max="99" placeholder="1" style="max-width:100px">
+              <div class="form-text">Stok fiyat sorgularında kullanılacak ITM1 fiyat listesi numarası (varsayılan: 1)</div>
+            </div>
             <button class="btn btn-primary btn-sm" onclick="saveNotifSettings()">
               <i class="bi bi-floppy me-1"></i>Kaydet
             </button>
@@ -529,8 +535,9 @@ async function loadSettings() {
     </div>`;
   }).join('');
 
-  // Bildirim
-  document.getElementById('servisTemplate').value = data.SERVIS_NOTIF_TEMPLATE || '';
+  // Bildirim & Diğer
+  document.getElementById('servisTemplate').value  = data.SERVIS_NOTIF_TEMPLATE || '';
+  document.getElementById('stockPriceList').value  = data.STOCK_PRICE_LIST       || '1';
 
   // Admin kullanıcı adı
   document.getElementById('adminUsername').value = data.ADMIN_USERNAME || '';
@@ -684,12 +691,16 @@ async function saveOpenaiKey() {
 }
 
 async function saveNotifSettings() {
+  const priceList = parseInt(document.getElementById('stockPriceList').value.trim()) || 1;
   const res  = await fetch('/admin/api/settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ SERVIS_NOTIF_TEMPLATE: document.getElementById('servisTemplate').value.trim() }),
+    body: JSON.stringify({
+      SERVIS_NOTIF_TEMPLATE: document.getElementById('servisTemplate').value.trim(),
+      STOCK_PRICE_LIST:      String(priceList),
+    }),
   });
   const data = await res.json();
-  if (res.ok) showAlert('Bildirim ayarları kaydedildi');
+  if (res.ok) showAlert('Bildirim & Diğer ayarları kaydedildi');
   else showAlert(data.error, 'danger');
 }
 
