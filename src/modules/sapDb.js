@@ -529,8 +529,8 @@ async function getSatisByKategori({ startDate, endDate, top = 5, dbName }) {
     LEFT  JOIN OITM i WITH(NOLOCK) ON l.ItemCode   = i.ItemCode
     LEFT  JOIN OITB g WITH(NOLOCK) ON i.ItmsGrpCod = g.ItmsGrpCod
     LEFT  JOIN OSLP s WITH(NOLOCK) ON h.SlpCode    = s.SlpCode
-    WHERE h.DocDate >= @StartDate
-      AND h.DocDate <= @EndDate
+    WHERE h.DocDate >= ISNULL(@StartDate, DATEADD(YEAR, -1, GETDATE()))
+      AND h.DocDate <= ISNULL(@EndDate, GETDATE())
       AND h.CANCELED = 'N'
     GROUP BY g.ItmsGrpNam, s.SlpName
     ORDER BY ToplamSatis DESC
@@ -559,8 +559,8 @@ async function getSatisByMarka({ startDate, endDate, top = 5, dbName }) {
     INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
     LEFT  JOIN OITM i WITH(NOLOCK) ON l.ItemCode  = i.ItemCode
     LEFT  JOIN OSLP s WITH(NOLOCK) ON h.SlpCode   = s.SlpCode
-    WHERE h.DocDate >= @StartDate
-      AND h.DocDate <= @EndDate
+    WHERE h.DocDate >= ISNULL(@StartDate, DATEADD(YEAR, -1, GETDATE()))
+      AND h.DocDate <= ISNULL(@EndDate, GETDATE())
       AND h.CANCELED = 'N'
     GROUP BY i.U_BE1_MARKAKODU, s.SlpName
     ORDER BY ToplamSatis DESC
@@ -586,8 +586,8 @@ async function getSatisByTemsilci({ startDate, endDate, top = 10, dbName }) {
       COUNT(h.DocEntry)                   AS BelgeSayisi
     FROM OINV h WITH(NOLOCK)
     LEFT JOIN OSLP s WITH(NOLOCK) ON h.SlpCode = s.SlpCode
-    WHERE h.DocDate >= @StartDate
-      AND h.DocDate <= @EndDate
+    WHERE h.DocDate >= ISNULL(@StartDate, DATEADD(YEAR, -1, GETDATE()))
+      AND h.DocDate <= ISNULL(@EndDate, GETDATE())
       AND h.CANCELED = 'N'
     GROUP BY s.SlpName
     ORDER BY ToplamSatis DESC
