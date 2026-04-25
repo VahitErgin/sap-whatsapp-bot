@@ -122,17 +122,24 @@ Teknik servis / hizmet çağrısı sorguları:
 
 Ürün kategorisine göre satış tutarları:
   endpoint: "SQL_SATIS_KATEGORI"
-  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "5" }
+  params: { "startDate": null, "endDate": null, "top": "5" }
+  ÖNEMLİ: Kullanıcı tarih/dönem belirtmediyse startDate ve endDate MUTLAKA null bırak.
+  Sistem otomatik olarak kullanıcıya dönem seçim butonları gösterir.
+  Tarih belirtilmişse (ör: "bu ay", "ocak", "2026") o tarihi kullan.
   → Kullanım: "kategori bazlı satış", "ürün grubu satışları", "en çok satan kategori"
 
 Marka bazlı satış tutarları (SatisTemsilcisi dahil):
   endpoint: "SQL_SATIS_MARKA"
-  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "5" }
+  params: { "startDate": null, "endDate": null, "top": "5" }
+  ÖNEMLİ: Kullanıcı tarih/dönem belirtmediyse startDate ve endDate MUTLAKA null bırak.
+  Sistem otomatik olarak kullanıcıya dönem seçim butonları gösterir.
   → Kullanım: "marka bazlı satış", "markaya göre satış", "en çok satan marka"
 
 Satış temsilcisi bazlı satış tutarları:
   endpoint: "SQL_SATIS_TEMSILCI"
-  params: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "top": "10" }
+  params: { "startDate": null, "endDate": null, "top": "10" }
+  ÖNEMLİ: Kullanıcı tarih/dönem belirtmediyse startDate ve endDate MUTLAKA null bırak.
+  Sistem otomatik olarak kullanıcıya dönem seçim butonları gösterir.
   → Kullanım: "temsilci bazlı satış", "satış personeli raporu", "en çok satan temsilci", "çalışan bazlı satış"
 
 Stokta olup satışı olmayan ürünler:
@@ -334,9 +341,11 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
 
     // ── Dönem seçimi gerekiyor mu? ────────────────────────────────
     // Tarihsiz rapor sorgusu → kullanıcıya dönem butonları gönder
+    // null / undefined / "" hepsini "tarih verilmemiş" sayar
+    const _hasDate = v => v != null && v !== '';
     if (!_injectedPlan && Array.isArray(plan.queries)) {
       const needsPeriod = plan.queries.some(q =>
-        _PERIOD_ENDPOINTS.has(q.endpoint) && !q.params?.startDate && !q.params?.endDate
+        _PERIOD_ENDPOINTS.has(q.endpoint) && !_hasDate(q.params?.startDate) && !_hasDate(q.params?.endDate)
       );
       if (needsPeriod) {
         _pendingPeriod.set(from, {
