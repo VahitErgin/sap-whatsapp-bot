@@ -15,6 +15,7 @@ const { getEdocConfig, saveEdocConfig } = require('../services/edocumentService'
 const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
 const { testConnection: graphTestConnection } = require('../services/graphService');
 const { getStats, addUser, updateUser, removeUser } = require('../services/userRegistry');
+const { getLicenseInfo, importLicense, getFingerprint } = require('../services/licenseService');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -364,6 +365,24 @@ router.delete('/api/users/:phone', requireAuth, (req, res) => {
     res.json(removeUser(req.params.phone));
   } catch (err) {
     res.status(404).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Lisans
+// ─────────────────────────────────────────────────────────────
+router.get('/api/license', requireAuth, (_req, res) => {
+  res.json({ ...getLicenseInfo(), fingerprint: getFingerprint() });
+});
+
+router.post('/api/license', requireAuth, (req, res) => {
+  const { content } = req.body || {};
+  if (!content) return res.status(400).json({ error: 'Lisans içeriği (base64) zorunlu' });
+  try {
+    const payload = importLicense(content.trim());
+    res.json({ ok: true, payload });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

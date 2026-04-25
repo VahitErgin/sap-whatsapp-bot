@@ -55,8 +55,28 @@
 
     <div id="infoBox" class="alert alert-info py-2 mb-3 d-none">
       <i class="bi bi-info-circle me-2"></i>
-      <strong>MAX_USERS tanımlı değil</strong> — Şu an tüm numaralar erişebilir.
-      Kullanıcı kısıtlaması için <code>.env</code> dosyasına <code>MAX_USERS=20</code> ekleyin.
+      <strong>Lisans yok</strong> — Şu an tüm numaralar erişebilir.
+      Lisans almak için aşağıdaki Fingerprint'i Endeks'e gönderin.
+    </div>
+
+    <!-- Lisans Kartı -->
+    <div class="card mb-3">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-shield-check me-2" style="color:#6cb2eb"></i>Lisans</span>
+        <button class="btn btn-sm btn-outline-primary" onclick="openImportModal()">
+          <i class="bi bi-upload me-1"></i>Lisans İçe Aktar
+        </button>
+      </div>
+      <div class="card-body py-3">
+        <div id="licenseDetail" class="text-muted small">Yükleniyor…</div>
+        <div class="mt-2">
+          <span class="text-muted small">Sistem Fingerprint:</span>
+          <code id="fpCode" class="ms-2" style="font-size:.8rem;word-break:break-all"></code>
+          <button class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1" onclick="copyFp()" title="Kopyala">
+            <i class="bi bi-clipboard" style="font-size:.75rem"></i>
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -118,6 +138,36 @@
   </div>
 </div>
 
+<!-- Lisans İçe Aktar Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-semibold"><i class="bi bi-shield-check me-2"></i>Lisans İçe Aktar</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="importAlert" class="alert alert-danger py-2 d-none"></div>
+        <p class="text-muted small mb-2">Endeks'ten aldığınız <code>.lic</code> dosyasının içeriğini buraya yapıştırın veya dosyayı seçin.</p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Lisans Dosyası</label>
+          <input type="file" class="form-control form-control-sm" id="licFile" accept=".lic" onchange="onLicFileChange()">
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold small">veya Lisans İçeriği (Base64)</label>
+          <textarea class="form-control font-monospace" id="licContent" rows="5" placeholder="Lisans içeriğini buraya yapıştırın…" style="font-size:.78rem"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary btn-sm" onclick="doImportLicense()">
+          <i class="bi bi-upload me-1"></i>İçe Aktar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Sil Onay Modal -->
 <div class="modal fade" id="delModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -142,6 +192,28 @@
 <script src="/admin/admin-i18n.js"></script>
 <script>
 let _pendingDel = null;
+
+async function loadLicense() {
+  try {
+    const res  = await fetch('/admin/api/license');
+    const data = await res.json();
+
+    document.getElementById('fpCode').textContent = data.fingerprint || '—';
+
+    const det = document.getElementById('licenseDetail');
+    if (data.active) {
+      const exp = data.expiresAt ? new Date(data.expiresAt).toLocaleDateString('tr-TR') : '∞';
+      det.innerHTML = `<span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Aktif</span>
+        &nbsp;|&nbsp; Müşteri: <strong>${esc(data.customer)}</strong>
+        &nbsp;|&nbsp; Max Kullanıcı: <strong>${data.maxUsers}</strong>
+        &nbsp;|&nbsp; Bitiş: <strong>${exp}</strong>`;
+    } else if (data.error) {
+      det.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(data.error)}</span>`;
+    } else {
+      det.innerHTML = `<span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Lisans yüklü değil</span>`;
+    }
+  } catch { /* silent */ }
+}
 
 async function load() {
   const res  = await fetch('/admin/api/users');
@@ -258,10 +330,54 @@ document.getElementById('confirmDelBtn').addEventListener('click', async () => {
   load();
 });
 
+function openImportModal() {
+  document.getElementById('licFile').value    = '';
+  document.getElementById('licContent').value = '';
+  document.getElementById('importAlert').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+function onLicFileChange() {
+  const file = document.getElementById('licFile').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('licContent').value = e.target.result.trim(); };
+  reader.readAsText(file);
+}
+
+async function doImportLicense() {
+  const content  = document.getElementById('licContent').value.trim();
+  const alertEl  = document.getElementById('importAlert');
+  alertEl.classList.add('d-none');
+  if (!content) { alertEl.textContent = 'Lisans içeriği boş'; alertEl.classList.remove('d-none'); return; }
+
+  const res  = await fetch('/admin/api/license', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  if (!res.ok) { alertEl.textContent = data.error; alertEl.classList.remove('d-none'); return; }
+
+  bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+  await loadLicense();
+  load();
+}
+
+function copyFp() {
+  const fp = document.getElementById('fpCode').textContent;
+  navigator.clipboard.writeText(fp).then(() => {
+    const btn = document.querySelector('[onclick="copyFp()"]');
+    btn.innerHTML = '<i class="bi bi-check" style="font-size:.75rem"></i>';
+    setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard" style="font-size:.75rem"></i>'; }, 1500);
+  });
+}
+
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+loadLicense();
 load();
 </script>
 </body>

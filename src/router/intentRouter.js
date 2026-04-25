@@ -58,14 +58,6 @@ async function handleIncoming({ from, text }) {
   const upper = text.toUpperCase().trim();
 
   try {
-    // ── 0. Kullanıcı kayıt kontrolü (MAX_USERS aktifse) ──────
-    if (isEnabled() && !isAllowed(from)) {
-      console.log(`[Router] Kayıtsız numara reddedildi: ${from}`);
-      return await sendText(from,
-        '🔒 Bu sistem yalnızca kayıtlı kullanıcılara açıktır.\n\nErişim için sistem yöneticinizle iletişime geçin.'
-      );
-    }
-
     // ── 1. Şifre bekleme modu — Claude'a gitmeden yakala ─────
     const awaitingPw = getAwaitingPassword(from);
     if (awaitingPw) {
@@ -88,6 +80,15 @@ async function handleIncoming({ from, text }) {
     const user = await resolveUser(from);
     if (!user) {
       return await sendText(from, t(getLang(from), 'unknown_user'));
+    }
+
+    // ── 2a. Kayıt defteri — sadece OUSR (dahili) kullanıcılar ─
+    // OCPR (müşteri ilgili kişi) lisans limitinin dışındadır.
+    if (!user.isCustomer && isEnabled() && !isAllowed(from)) {
+      console.log(`[Router] OUSR kayıt dışı: ${from}`);
+      return await sendText(from,
+        '🔒 Bot erişiminiz aktif değil.\nYöneticinizle iletişime geçin.'
+      );
     }
 
     // ── 3. Buton cevapları → direkt yönlendir ────────────────

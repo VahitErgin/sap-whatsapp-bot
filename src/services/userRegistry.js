@@ -4,13 +4,14 @@
  * userRegistry.js
  *
  * WhatsApp bot'una erişim izni olan telefon numaralarını yönetir.
- * Lisans limiti .env MAX_USERS ile belirlenir — müşteri değiştiremez.
+ * Lisans limiti licenseService'den okunur (data/license.lic yoksa env MAX_USERS fallback).
  *
- * MAX_USERS tanımlı değilse kayıt kontrolü devre dışı (geriye dönük uyumluluk).
+ * Kayıt kontrolü devre dışı: lisans yoksa VE MAX_USERS tanımlı değilse.
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs             = require('fs');
+const path           = require('path');
+const licenseService = require('./licenseService');
 
 const REGISTRY_FILE = path.join(__dirname, '../../data/users.json');
 const DATA_DIR      = path.join(__dirname, '../../data');
@@ -30,8 +31,7 @@ function saveRegistry(reg) {
 
 // ─── Limit ───────────────────────────────────────────────────
 function getMaxUsers() {
-  const v = parseInt(process.env.MAX_USERS || '0');
-  return v > 0 ? v : null; // null = sınırsız / kontrol yok
+  return licenseService.getMaxUsers(); // lisans dosyası yoksa env MAX_USERS fallback
 }
 
 // Kayıt kontrolü aktif mi?

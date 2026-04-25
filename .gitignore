@@ -13,6 +13,9 @@ data/
 test-sap.js
 all-src.txt
 
+# Lisans anahtar çifti — asla commit edilmez
+tools/keys/
+
 # Log dosyaları
 *.log
 npm-debug.log*
