@@ -119,7 +119,8 @@ async function resolveUser(phone, dbName) {
     return user;
   }
 
-  _cache.set(phone10, { user: null, expiresAt: Date.now() + CACHE_TTL });
+  // Bulunamayanlar kısa TTL (30 sn) ile cache'le — yeni kayıt hemen denensin
+  _cache.set(phone10, { user: null, expiresAt: Date.now() + 30 * 1000 });
   return null;
 }
 

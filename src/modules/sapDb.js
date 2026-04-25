@@ -402,15 +402,22 @@ async function getOnayBekleyenler({ dbName } = {}) {
 
 // ─────────────────────────────────────────────────────────────
 // OCPR İlgili Kişiler: Cellolar/Tel1/Tel2 → CardCode bul
+//
+// SAP'a boşluklu/tireli kaydedilebilir (ör: "90 553 667 69 34").
+// REPLACE zinciriyle boşluk, tire, artı, parantez soyularak
+// son 10 rakamla LIKE karşılaştırması yapılır.
 // ─────────────────────────────────────────────────────────────
 async function getCustomerByPhone(phone10, dbName) {
   const rows = await execute(`
     SELECT TOP 1 c.CardCode, c.Name AS ContactName, bp.CardName
     FROM OCPR c WITH(NOLOCK)
     LEFT JOIN OCRD bp WITH(NOLOCK) ON c.CardCode = bp.CardCode
-    WHERE c.Cellolar LIKE @Phone
-       OR c.Tel1     LIKE @Phone
-       OR c.Tel2     LIKE @Phone
+    WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.Cellolar,
+            ' ',''),'-',''),'+',''),'(',''),')','') LIKE @Phone
+       OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.Tel1,
+            ' ',''),'-',''),'+',''),'(',''),')','') LIKE @Phone
+       OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.Tel2,
+            ' ',''),'-',''),'+',''),'(',''),')','') LIKE @Phone
   `, { Phone: `%${phone10}` }, dbName);
 
   return rows[0] || null;
@@ -423,7 +430,8 @@ async function getUserByPhone(phone10, dbName) {
   const rows = await execute(`
     SELECT TOP 1 USER_CODE, U_NAME, PortNum, Language
     FROM OUSR WITH(NOLOCK)
-    WHERE PortNum LIKE @Phone
+    WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(PortNum,
+            ' ',''),'-',''),'+',''),'(',''),')','') LIKE @Phone
   `, { Phone: `%${phone10}` }, dbName);
 
   return rows[0] || null;
