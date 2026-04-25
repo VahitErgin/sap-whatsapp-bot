@@ -7,7 +7,7 @@ const config   = require('../config/config');
 const { requireAuth }                      = require('./authMiddleware');
 const { readApprovers, addApprover, removeApprover } = require('./approverService');
 const { listTemplates, createTemplate, deleteTemplate } = require('./templateService');
-const { getConnection }                    = require('../modules/sapClient');
+const { getConnection, reinit: reinitSap }  = require('../modules/sapClient');
 const { readEnv, updateEnv }               = require('./configService');
 const { readLogs }                         = require('../services/logService');
 const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('../services/taskService');
@@ -264,6 +264,10 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.ATTACHMENT_MAX_MB !== undefined)   process.env.ATTACHMENT_MAX_MB   = updates.ATTACHMENT_MAX_MB;
   if (updates.SERVIS_NOTIF_TEMPLATE !== undefined) process.env.SERVIS_NOTIF_TEMPLATE = updates.SERVIS_NOTIF_TEMPLATE;
   if (updates.STOCK_PRICE_LIST !== undefined)      process.env.STOCK_PRICE_LIST      = updates.STOCK_PRICE_LIST;
+
+  // SAP bağlantı bilgileri değiştiyse connection pool'u yenile
+  const sapChanged = ['SAP_SERVICE_LAYER_URL','SAP_COMPANY_DB','SAP_DATABASES','SAP_USERNAME','SAP_PASSWORD'].some(k => k in updates);
+  if (sapChanged) reinitSap();
 
   res.json({ ok: true });
 });

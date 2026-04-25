@@ -268,4 +268,10 @@ function getConnection(dbName) {
 // ─────────────────────────────────────────────────────────────
 _init();
 
-module.exports = { getConnection, SLConnection };
+// SAP ayarları değiştiğinde admin panelden çağrılır
+function reinit() {
+  for (const key of Object.keys(_connections)) delete _connections[key];
+  _init();
+}
+
+module.exports = { getConnection, reinit, SLConnection };

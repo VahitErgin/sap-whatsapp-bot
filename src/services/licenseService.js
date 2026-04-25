@@ -23,7 +23,7 @@ const os     = require('os');
 // tools/generate-keypair.js çıktısından buraya yapıştırın.
 // Bu key değişirse mevcut tüm .lic dosyaları geçersiz olur.
 const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAPLACEHOLDER_REPLACE_WITH_REAL_KEY_FROM_GENERATE_TOOL=
+MCowBQYDK2VwAyEAbI9WKCjvtQFBsJ9Ok6aQQQQ+BQDaL7H+QP0AVGaZmNE=
 -----END PUBLIC KEY-----`;
 
 const LICENSE_FILE = path.join(__dirname, '../../data/license.lic');
