@@ -201,7 +201,9 @@ router.get('/api/settings', requireAuth, (req, res) => {
     WA_VERIFY_TOKEN:         env.WA_VERIFY_TOKEN            || '',
     WA_ACCESS_TOKEN_SET:     !!env.WA_ACCESS_TOKEN,
     // SQL
+    SAP_DB_TYPE:             env.SAP_DB_TYPE               || 'mssql',
     SAP_DB_SERVER:           env.SAP_DB_SERVER             || '',
+    SAP_DB_PORT:             env.SAP_DB_PORT               || '',
     SAP_DB_NAME:             env.SAP_DB_NAME               || '',
     SAP_DB_USER:             env.SAP_DB_USER               || '',
     SAP_DB_PASSWORD_SET:     !!env.SAP_DB_PASSWORD,
@@ -227,7 +229,7 @@ router.post('/api/settings', requireAuth, (req, res) => {
     'SAP_SERVICE_LAYER_URL', 'SAP_COMPANY_DB', 'SAP_DATABASES', 'SAP_USERNAME', 'SAP_PASSWORD',
     'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN',
     'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
-    'SAP_DB_SERVER', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
+    'SAP_DB_TYPE', 'SAP_DB_SERVER', 'SAP_DB_PORT', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
     'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',
     'SERVIS_NOTIF_TEMPLATE', 'STOCK_PRICE_LIST',
   ];
@@ -254,7 +256,9 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.WA_PHONE_NUMBER_ID)    config.whatsapp.phoneNumberId = updates.WA_PHONE_NUMBER_ID;
   if (updates.WA_VERIFY_TOKEN)       config.whatsapp.verifyToken   = updates.WA_VERIFY_TOKEN;
   if (updates.ANTHROPIC_API_KEY)     config.anthropic.apiKey       = updates.ANTHROPIC_API_KEY;
+  if (updates.SAP_DB_TYPE)           process.env.SAP_DB_TYPE       = updates.SAP_DB_TYPE;
   if (updates.SAP_DB_SERVER)         config.sapDb.server           = updates.SAP_DB_SERVER;
+  if (updates.SAP_DB_PORT)           process.env.SAP_DB_PORT       = updates.SAP_DB_PORT;
   if (updates.SAP_DB_NAME)           config.sapDb.database         = updates.SAP_DB_NAME;
   if (updates.SAP_DB_USER)           config.sapDb.user             = updates.SAP_DB_USER;
   if (updates.SAP_DB_PASSWORD)       config.sapDb.password         = updates.SAP_DB_PASSWORD;

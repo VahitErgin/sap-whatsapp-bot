@@ -144,11 +144,24 @@
           <div class="card-header"><i class="bi bi-server me-2"></i><span data-i18n="card_sql">SAP SQL Veritabanı (Direkt Bağlantı)</span></div>
           <div class="card-body">
             <div class="row g-3">
-              <div class="col-md-4">
+              <div class="col-md-2">
+                <label class="form-label fw-semibold small">DB Türü</label>
+                <select class="form-select form-select-sm" id="sqlDbType">
+                  <option value="mssql">MSSQL (SQL Server)</option>
+                  <option value="hana">SAP HANA</option>
+                </select>
+                <div class="form-text">Değişiklik sonrası sunucu yeniden başlatılmalı</div>
+              </div>
+              <div class="col-md-3">
                 <label class="form-label fw-semibold small">Sunucu</label>
                 <input type="text" class="form-control form-control-sm" id="sqlServer" placeholder="ENDEKSDC-02.endeks.local">
               </div>
-              <div class="col-md-3">
+              <div class="col-md-1">
+                <label class="form-label fw-semibold small">Port</label>
+                <input type="number" class="form-control form-control-sm" id="sqlPort" placeholder="1433">
+                <div class="form-text">Boş = varsayılan</div>
+              </div>
+              <div class="col-md-2">
                 <label class="form-label fw-semibold small">Veritabanı Adı</label>
                 <input type="text" class="form-control form-control-sm" id="sqlDb" placeholder="TestEndeks011225">
               </div>
@@ -156,10 +169,10 @@
                 <label class="form-label fw-semibold small">Kullanıcı</label>
                 <input type="text" class="form-control form-control-sm" id="sqlUser" placeholder="sa">
               </div>
-              <div class="col-md-3">
+              <div class="col-md-2">
                 <label class="form-label fw-semibold small">
                   Şifre
-                  <span class="text-muted fw-normal">(boş bırakırsan değişmez)</span>
+                  <span class="text-muted fw-normal">(boş = değişmez)</span>
                 </label>
                 <div class="input-group input-group-sm">
                   <input type="password" class="form-control" id="sqlPassword" placeholder="••••••••">
@@ -508,7 +521,9 @@ async function loadSettings() {
     data.WA_ACCESS_TOKEN_SET ? '✓ Token kayıtlı (değiştirmek için yeni token gir)' : '⚠ Token tanımlı değil';
 
   // SQL
+  document.getElementById('sqlDbType').value = data.SAP_DB_TYPE   || 'mssql';
   document.getElementById('sqlServer').value = data.SAP_DB_SERVER || '';
+  document.getElementById('sqlPort').value   = data.SAP_DB_PORT   || '';
   document.getElementById('sqlDb').value     = data.SAP_DB_NAME   || '';
   document.getElementById('sqlUser').value   = data.SAP_DB_USER   || '';
   document.getElementById('sqlPasswordStatus').textContent =
@@ -574,7 +589,9 @@ async function saveCrmSettings() {
 
 async function saveSqlSettings() {
   const body = {
+    SAP_DB_TYPE:   document.getElementById('sqlDbType').value,
     SAP_DB_SERVER: document.getElementById('sqlServer').value.trim(),
+    SAP_DB_PORT:   document.getElementById('sqlPort').value.trim(),
     SAP_DB_NAME:   document.getElementById('sqlDb').value.trim(),
     SAP_DB_USER:   document.getElementById('sqlUser').value.trim(),
   };
@@ -588,7 +605,7 @@ async function saveSqlSettings() {
   });
   const data = await res.json();
   if (res.ok) {
-    showAlert('SQL veritabanı ayarları kaydedildi');
+    showAlert('SQL veritabanı ayarları kaydedildi' + (body.SAP_DB_TYPE ? ' — DB Türü değişikliği için sunucuyu yeniden başlatın' : ''));
     document.getElementById('sqlPassword').value = '';
     loadSettings();
   } else {
