@@ -176,6 +176,9 @@ let _phones    = [];
 let _bsModal   = null;
 let _templates = []; // onaylı Meta şablonları
 
+// Dönem seçimi olan rapor tipleri (pending_approvals ve custom_query hariç)
+const _PERIOD_TYPES = new Set(['sales_performance','overdue_balances','overdue_orders','collection_target']);
+
 const TEMPLATE_PARAM_HINTS = {
   pending_approvals: '{{1}} = onay adedi  ·  {{2}} = belge listesi',
   overdue_balances:  '{{1}} = kayıt sayısı  ·  {{2}} = bakiye listesi',
@@ -315,7 +318,7 @@ function onTypeChange(val) {
     desc.style.display = 'none';
   }
   document.getElementById('queryWrap').style.display  = v === 'custom_query'    ? '' : 'none';
-  document.getElementById('periodWrap').style.display  = v === 'sales_performance' ? '' : 'none';
+  document.getElementById('periodWrap').style.display  = _PERIOD_TYPES.has(v) ? '' : 'none';
 
   const hint = document.getElementById('templateParamHint');
   if (TEMPLATE_PARAM_HINTS[v]) {
@@ -380,7 +383,7 @@ async function saveTask() {
   const body = {
     type, name, time, phones: _phones, enabled,
     ...(type === 'custom_query'    ? { query } : {}),
-    ...(type === 'sales_performance' ? { period: document.getElementById('taskPeriod').value } : {}),
+    ...(_PERIOD_TYPES.has(type) ? { period: document.getElementById('taskPeriod').value } : {}),
     ...(templateName ? { templateName, templateLang } : { templateName: '', templateLang: '' }),
   };
   const url  = id ? `/admin/api/tasks/${id}` : '/admin/api/tasks';

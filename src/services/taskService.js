@@ -81,7 +81,7 @@ function createTask({ name, type, time, phones, query, period, enabled = true, t
     enabled:   Boolean(enabled),
     createdAt: new Date().toISOString(),
     ...(type === 'custom_query' ? { query: query.trim() } : {}),
-    ...(period && PERIOD_DAYS[period] ? { period } : {}),
+    ...(period && PERIOD_DAYS[period] && type !== 'pending_approvals' && type !== 'custom_query' ? { period } : {}),
     ...(templateName ? { templateName, templateLang: templateLang || 'tr' } : {}),
   };
   tasks.push(task);
