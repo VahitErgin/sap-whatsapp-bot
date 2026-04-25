@@ -334,6 +334,8 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     const langNote     = langInstruction(lang);
     const planQuestion = [
       licenseRestriction ? `[LİSANS KISITLAMASI: ${licenseRestriction}]` : '',
+      // Müşteri portal kullanıcısı: CardCode bilindiğinden clarification isteme
+      customerCardCode   ? `[MÜŞTERİ KART KODU: ${customerCardCode} — Bu kullanıcının CardCode'u budur. Tüm sorgularda bu CardCode'u kullan, asla clarification isteme.]` : '',
       langNote           ? `[YANIT DİLİ: ${langNote}]` : '',
       question,
     ].filter(Boolean).join('\n\n');
@@ -381,6 +383,13 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     // → direkt BusinessPartners'da cardName araması yap (hatalı clarification kurtarma)
     // _skipFallback=true ise (cari seçimi sonrası) bu bloğu atla → sonsuz döngü önlenir
     if (plan.clarification_needed && !_skipFallback) {
+      // Müşteri portal kullanıcısı: CardCode bilindiğinden cari sorusu anlamsız,
+      // CardCode'u prefix'e ekleyerek sorguyu yeniden dene
+      if (customerCardCode) {
+        console.log(`[Cashflow] clarification → müşteri kodu bilindiğinden yeniden planlama: ${customerCardCode}`);
+        return await handleQuery({ from, question: `${customerCardCode} : ${question}`, dbName,
+          _skipFallback: true, licenseRestriction, customerCardCode, lang });
+      }
       const nameMatch = question.match(/([A-ZÇĞİÖŞÜa-zçğışöşü]{3,}(?:\s+[A-ZÇĞİÖŞÜa-zçğışöşü]{2,})*)/);
       if (nameMatch) {
         const cardName      = nameMatch[1].trim();
