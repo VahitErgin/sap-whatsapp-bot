@@ -12,7 +12,7 @@ const fs   = require('fs');
 const path = require('path');
 
 const { sendText, sendTemplate } = require('./whatsappService');
-const { getOnayBekleyenler, getVadesiGecenler, getCustomerByPhone, runRawQuery } = require('../modules/sapDb');
+const { getOnayBekleyenler, getVadesiGecenler, getCustomerByPhone, runRawQuery, getSatisByTemsilci } = require('../modules/sapDb');
 
 const TASKS_FILE = path.join(__dirname, '../../data/scheduled-tasks.json');
 const DATA_DIR   = path.join(__dirname, '../../data');
@@ -44,7 +44,28 @@ function saveTasks(tasks) {
   fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2), 'utf8');
 }
 
-function createTask({ name, type, time, phones, query, enabled = true, templateName, templateLang }) {
+// ─────────────────────────────────────────────────────────────
+// Dönem hesaplayıcı — period string → { startDate, endDate }
+// ─────────────────────────────────────────────────────────────
+const PERIOD_DAYS = {
+  weekly:     7,
+  biweekly:   14,
+  monthly:    30,
+  quarterly:  90,
+  semiannual: 180,
+  annual:     365,
+};
+
+function _calcDateRange(period) {
+  const days = PERIOD_DAYS[period] || 30;
+  const end  = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - days);
+  const fmt = d => d.toISOString().split('T')[0];
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+function createTask({ name, type, time, phones, query, period, enabled = true, templateName, templateLang }) {
   if (!TASK_TYPES[type])  throw new Error('Geçersiz görev tipi');
   if (!/^\d{2}:\d{2}$/.test(time)) throw new Error('Saat HH:MM formatında olmalı');
   if (!phones?.length)    throw new Error('En az bir telefon numarası gerekli');
@@ -60,6 +81,7 @@ function createTask({ name, type, time, phones, query, enabled = true, templateN
     enabled:   Boolean(enabled),
     createdAt: new Date().toISOString(),
     ...(type === 'custom_query' ? { query: query.trim() } : {}),
+    ...(period && PERIOD_DAYS[period] ? { period } : {}),
     ...(templateName ? { templateName, templateLang: templateLang || 'tr' } : {}),
   };
   tasks.push(task);
@@ -68,6 +90,9 @@ function createTask({ name, type, time, phones, query, enabled = true, templateN
 }
 
 function updateTask(id, updates) {
+  if (updates.period !== undefined && updates.period !== '' && !PERIOD_DAYS[updates.period]) {
+    throw new Error('Geçersiz dönem');
+  }
   const tasks = readTasks();
   const idx   = tasks.findIndex(t => t.id === id);
   if (idx === -1) throw new Error('Görev bulunamadı');
@@ -185,6 +210,34 @@ async function runCustomQuery(phone, task) {
   await _dispatch(phone, task, text, components);
 }
 
+async function runSalesPerformance(phone, task) {
+  const { startDate, endDate } = _calcDateRange(task.period || 'monthly');
+  const rows = await getSatisByTemsilci({ startDate, endDate, top: 10 });
+
+  if (!rows.length) {
+    await _dispatch(phone, task,
+      `📊 *${task.name}*\n\nBu dönemde satış verisi bulunamadı.`,
+      [{ type: 'text', text: task.name }, { type: 'text', text: 'Veri bulunamadı.' }]
+    );
+    return;
+  }
+
+  const periodLabel = {
+    weekly: 'Son 7 Gün', biweekly: 'Son 14 Gün', monthly: 'Son 30 Gün',
+    quarterly: 'Son 3 Ay', semiannual: 'Son 6 Ay', annual: 'Son 1 Yıl',
+  }[task.period || 'monthly'] || 'Son 30 Gün';
+
+  const lines = rows.map((r, i) =>
+    `${i + 1}. *${r.SatisTemsilcisi}*: ${_fmt(r.ToplamSatis)} ₺ (${r.BelgeSayisi} fatura)`
+  );
+  const text = `📊 *${task.name}*\n_${periodLabel} · ${startDate} – ${endDate}_\n\n${lines.join('\n')}`;
+  const components = [
+    { type: 'text', text: task.name },
+    { type: 'text', text: lines.join('\n') },
+  ];
+  await _dispatch(phone, task, text, components);
+}
+
 async function runPlaceholder(phone, task) {
   await sendText(phone,
     `📊 *${task.name}* raporu hazırlanıyor.\n\nBu rapor tipi yakında aktif olacaktır.`
@@ -195,10 +248,11 @@ async function runTask(task) {
   for (const phone of task.phones) {
     try {
       switch (task.type) {
-        case 'pending_approvals': await runPendingApprovals(phone, task); break;
-        case 'overdue_balances':  await runOverdueBalances(phone, task);  break;
-        case 'custom_query':      await runCustomQuery(phone, task);      break;
-        default:                  await runPlaceholder(phone, task);      break;
+        case 'pending_approvals':  await runPendingApprovals(phone, task);   break;
+        case 'overdue_balances':   await runOverdueBalances(phone, task);    break;
+        case 'sales_performance':  await runSalesPerformance(phone, task);   break;
+        case 'custom_query':       await runCustomQuery(phone, task);         break;
+        default:                   await runPlaceholder(phone, task);         break;
       }
       console.log(`[Scheduler] ✓ ${task.name} → ${phone}`);
     } catch (err) {

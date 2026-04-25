@@ -23,7 +23,7 @@ const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
 const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi } = require('./sapDb');
-const { sendText, sendList }         = require('../services/whatsappService');
+const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
@@ -231,6 +231,31 @@ function fmtMoney(val, currency) {
 // ─── Çoklu cari seçimi için bekleyen sorgular (5 dakika TTL) ─
 const _pending = new Map(); // phone → { question, cardName, dbName, expiresAt }
 
+// ─── Dönem seçimi bekleyen sorgular ──────────────────────────
+const _pendingPeriod = new Map(); // phone → { plan, dbName, expiresAt }
+
+const _PERIOD_OPTS = [
+  { id: 'PERIOD:weekly',     title: 'Bu Hafta'  },
+  { id: 'PERIOD:monthly',    title: 'Bu Ay'     },
+  { id: 'PERIOD:quarterly',  title: 'Son 3 Ay'  },
+];
+
+function _periodDates(period) {
+  const days = { weekly: 7, biweekly: 14, monthly: 30, quarterly: 90, semiannual: 180, annual: 365 }[period] || 30;
+  const end  = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - days);
+  const fmt = d => d.toISOString().split('T')[0];
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+const _PERIOD_LABEL = {
+  weekly: 'Son 7 Gün', biweekly: 'Son 14 Gün', monthly: 'Son 30 Gün',
+  quarterly: 'Son 3 Ay', semiannual: 'Son 6 Ay', annual: 'Son 1 Yıl',
+};
+
+const _PERIOD_ENDPOINTS = new Set(['SQL_SATIS_TEMSILCI', 'SQL_SATIS_KATEGORI', 'SQL_SATIS_MARKA']);
+
 // ─── Sorgu sonuç cache'i (2 dk TTL) ──────────────────────────
 // Aynı kullanıcının aynı sorusunu tekrar Claude+SAP'a göndermez.
 const _resultCache = new Map();
@@ -252,11 +277,35 @@ function _bypassCache(q) { return /yenile|güncelle|taze|refresh/i.test(q); }
 // ─────────────────────────────────────────────────────────────
 // Ana fonksiyon – Cashflow ve genel SAP sorguları
 // ─────────────────────────────────────────────────────────────
-async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null, customerCardCode = null, lang = 'tr' }) {
+async function handleQuery({ from, question, dbName, _skipFallback = false, licenseRestriction = null, customerCardCode = null, lang = 'tr', _injectedPlan = null }) {
   if (!question || question.trim() === '') {
     return await sendText(from,
       '📊 *SAP Sorgulama*\n\nNe öğrenmek istersiniz?\n\nÖrnek:\n• _"C001 carisinin bakiyesi"_\n• _"Bu hafta vadesi gelen ödemeler"_\n• _"Stokta azalan ürünler"_'
     );
+  }
+
+  // ── Dönem butonu cevabı ──────────────────────────────────────
+  if (question.startsWith('PERIOD:')) {
+    const period  = question.slice(7).trim(); // weekly / monthly / quarterly …
+    const pending = _pendingPeriod.get(from);
+    if (!pending || pending.expiresAt < Date.now()) {
+      _pendingPeriod.delete(from);
+      return await sendText(from, '⌛ Dönem seçimi süresi doldu. Lütfen raporunuzu tekrar isteyin.');
+    }
+    _pendingPeriod.delete(from);
+    const { startDate, endDate } = _periodDates(period);
+    // Pending plan'daki her rapor sorgusuna tarihleri enjekte et
+    pending.plan.queries.forEach(q => {
+      if (_PERIOD_ENDPOINTS.has(q.endpoint)) {
+        q.params.startDate = startDate;
+        q.params.endDate   = endDate;
+      }
+    });
+    console.log(`[Cashflow] Dönem seçildi (${from}): ${period} → ${startDate}–${endDate}`);
+    return await handleQuery({ from, question: pending.origQuestion, dbName: pending.dbName,
+      _skipFallback: true, licenseRestriction: pending.licenseRestriction,
+      customerCardCode: pending.customerCardCode, lang: pending.lang,
+      _injectedPlan: pending.plan });
   }
 
   console.log(`[Cashflow] Sorgu (${from}): ${question}`);
@@ -281,7 +330,26 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
       langNote           ? `[YANIT DİLİ: ${langNote}]` : '',
       question,
     ].filter(Boolean).join('\n\n');
-    const plan = await buildQueryPlan(planQuestion);
+    const plan = _injectedPlan || await buildQueryPlan(planQuestion);
+
+    // ── Dönem seçimi gerekiyor mu? ────────────────────────────────
+    // Tarihsiz rapor sorgusu → kullanıcıya dönem butonları gönder
+    if (!_injectedPlan && Array.isArray(plan.queries)) {
+      const needsPeriod = plan.queries.some(q =>
+        _PERIOD_ENDPOINTS.has(q.endpoint) && !q.params?.startDate && !q.params?.endDate
+      );
+      if (needsPeriod) {
+        _pendingPeriod.set(from, {
+          plan, origQuestion: question, dbName, licenseRestriction,
+          customerCardCode, lang, expiresAt: Date.now() + 5 * 60 * 1000,
+        });
+        return await sendButtons(from,
+          '📊 Rapor Dönemi',
+          'Hangi dönem için rapor istersiniz?',
+          _PERIOD_OPTS
+        );
+      }
+    }
 
     // Müşteri kullanıcıysa tüm sorguları kendi CardCode'una kilitle
     if (customerCardCode && Array.isArray(plan.queries)) {

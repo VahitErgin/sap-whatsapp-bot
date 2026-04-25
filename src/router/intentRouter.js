@@ -92,6 +92,10 @@ async function handleIncoming({ from, text }) {
     }
 
     // ── 3. Buton cevapları → direkt yönlendir ────────────────
+    if (text.startsWith('PERIOD:')) {
+      return await cashflow.handleQuery({ from, question: text, dbName: user.dbName, lang: user.lang,
+        licenseRestriction: user.cashflowRestriction, customerCardCode: user.customerCardCode });
+    }
     if (upper.startsWith('APPROVE:')) {
       return await approval.confirmApproval({ from, docEntry: upper.replace('APPROVE:', '').trim(), action: 'approve' });
     }

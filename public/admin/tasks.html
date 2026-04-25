@@ -133,6 +133,19 @@
           <div id="templateParamHint" class="mt-1" style="font-size:.75rem;color:#64748b;display:none"></div>
         </div>
 
+        <!-- Dönem Seçimi (rapor tipleri için) -->
+        <div id="periodWrap" class="mt-3" style="display:none">
+          <label class="form-label" style="font-size:.82rem;color:#94a3b8">Rapor Dönemi</label>
+          <select id="taskPeriod" class="form-select form-select-sm" style="background:#131929;color:#e2e8f0;border-color:rgba(255,255,255,.15)">
+            <option value="weekly">Haftalık (Son 7 gün)</option>
+            <option value="biweekly">2 Haftalık (Son 14 gün)</option>
+            <option value="monthly" selected>Aylık (Son 30 gün)</option>
+            <option value="quarterly">3 Aylık (Son 90 gün)</option>
+            <option value="semiannual">6 Aylık (Son 180 gün)</option>
+            <option value="annual">Yıllık (Son 365 gün)</option>
+          </select>
+        </div>
+
         <!-- Özel SQL Sorgusu -->
         <div id="queryWrap" class="mt-3" style="display:none">
           <label class="form-label" style="font-size:.82rem;color:#94a3b8">SQL Sorgusu <span class="text-danger">*</span></label>
@@ -235,6 +248,7 @@ function renderCards(tasks) {
             ${(t.phones || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(p)}</span>`).join('')}
           </div>
           ${t.query ? `<div class="mt-2 p-1 rounded font-monospace" style="font-size:.72rem;color:#7dd3fc;background:#0d1117;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="${esc(t.query)}">${esc(t.query)}</div>` : ''}
+          ${t.period ? `<div class="mt-2" style="font-size:.78rem;color:#94a3b8"><i class="bi bi-calendar-range me-1" style="color:#6cb2eb"></i>Dönem: <span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25">${{'weekly':'Haftalık','biweekly':'2 Haftalık','monthly':'Aylık','quarterly':'3 Aylık','semiannual':'6 Aylık','annual':'Yıllık'}[t.period]||t.period}</span></div>` : ''}
           ${t.templateName ? `<div class="mt-2" style="font-size:.78rem;color:#94a3b8"><i class="bi bi-chat-square-text me-1" style="color:#25d366"></i>Şablon: <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25">${esc(t.templateName)}</span></div>` : ''}
         </div>
         <div class="card-footer d-flex gap-2 py-2" style="background:transparent;border-color:rgba(255,255,255,.08)">
@@ -275,7 +289,8 @@ function openModal(task) {
   document.getElementById('taskName').value      = task?.name || '';
   document.getElementById('taskTime').value      = task?.time || '08:00';
   document.getElementById('taskEnabled').checked = task?.enabled !== false;
-  document.getElementById('taskQuery').value     = task?.query || '';
+  document.getElementById('taskQuery').value        = task?.query  || '';
+  document.getElementById('taskPeriod').value       = task?.period || 'monthly';
   document.getElementById('taskTemplateLang').value = task?.templateLang || 'tr';
   document.getElementById('modalTitle').textContent = task ? 'Görevi Düzenle' : 'Yeni Görev';
   document.getElementById('modalError').textContent = '';
@@ -299,7 +314,8 @@ function onTypeChange(val) {
   } else {
     desc.style.display = 'none';
   }
-  document.getElementById('queryWrap').style.display = v === 'custom_query' ? '' : 'none';
+  document.getElementById('queryWrap').style.display  = v === 'custom_query'    ? '' : 'none';
+  document.getElementById('periodWrap').style.display  = v === 'sales_performance' ? '' : 'none';
 
   const hint = document.getElementById('templateParamHint');
   if (TEMPLATE_PARAM_HINTS[v]) {
@@ -363,7 +379,8 @@ async function saveTask() {
   const templateLang = document.getElementById('taskTemplateLang').value;
   const body = {
     type, name, time, phones: _phones, enabled,
-    ...(type === 'custom_query' ? { query } : {}),
+    ...(type === 'custom_query'    ? { query } : {}),
+    ...(type === 'sales_performance' ? { period: document.getElementById('taskPeriod').value } : {}),
     ...(templateName ? { templateName, templateLang } : { templateName: '', templateLang: '' }),
   };
   const url  = id ? `/admin/api/tasks/${id}` : '/admin/api/tasks';
