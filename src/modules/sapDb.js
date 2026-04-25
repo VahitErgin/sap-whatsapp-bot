@@ -3,41 +3,14 @@
 /**
  * sapDb.js
  *
- * SAP B1 MSSQL veritabanına direkt bağlantı.
- * Service Layer'ın desteklemediği JDT1/OJDT tabanlı sorgular için kullanılır.
+ * SAP B1 veritabanına direkt bağlantı (MSSQL veya HANA).
+ * Sürücü seçimi: SAP_DB_TYPE=mssql (varsayılan) | hana
  *
  * getCariEkstre → JDT1 satırlarını çeker, waterfall eşleştirme yapar,
  *                 sadece açık kalan kalemleri ve toplam bakiyeyi döndürür.
  */
 
-const sql    = require('mssql');
-const config = require('../config/config');
-
-// ─── Bağlantı havuzu ─────────────────────────────────────────
-const _pools = {};
-
-async function getPool(dbName) {
-  const db = dbName || config.sapDb.database;
-  if (_pools[db] && _pools[db].connected) return _pools[db];
-
-  const cfg = {
-    server:   config.sapDb.server,
-    database: db,
-    user:     config.sapDb.user,
-    password: config.sapDb.password,
-    options: {
-      encrypt:                false,
-      trustServerCertificate: true,
-      enableArithAbort:       true,
-    },
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-  };
-
-  console.log(`[SapDb] Bağlanıyor → ${config.sapDb.server} / ${db}`);
-  _pools[db] = await sql.connect(cfg);
-  console.log(`[SapDb] Bağlantı başarılı → ${db}`);
-  return _pools[db];
-}
+const { execute } = require('./sapDbDriver');
 
 // ─────────────────────────────────────────────────────────────
 // Waterfall Eşleştirme
@@ -132,16 +105,10 @@ function calcWaterfall(rows) {
 // Cari Hesap Ekstresi — JDT1 + OJDT + OCHH + waterfall
 // ─────────────────────────────────────────────────────────────
 async function getCariEkstre({ cardCode, refDate, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-
-  request.input('CardCode', sql.NVarChar(50), cardCode);
-  request.input('RefDate',  sql.Date,         refDate);
-
   // TRY → Debit/Credit kullan
   // Dövizli → FCDebit/FCCredit kullan
-  // Çek kuralı: TransType=24 + OCHH join → DueDate > RefDate ise BekleyenCek=1 (SQL'de filtrelenir)
-  const query = `
+  // Çek kuralı: TransType=24 + OCHH join → DueDate > RefDate ise BekleyenCek=1
+  const rows = await execute(`
     SELECT
       t0.ShortName,
       t0.Debit,
@@ -170,20 +137,14 @@ async function getCariEkstre({ cardCode, refDate, dbName }) {
     WHERE t0.ShortName = @CardCode
       AND (t0.Debit <> 0 OR t0.Credit <> 0 OR t0.FCDebit <> 0 OR t0.FCCredit <> 0)
       AND (
-        -- Normal kayıtlar: kayıt tarihi <= referans tarihi
         (t7.CheckKey IS NULL AND t3.RefDate <= @RefDate)
         OR
-        -- Vadesi gelen çekler: çek vadesi <= referans tarihi
         (t7.CheckKey IS NOT NULL AND t0.DueDate <= @RefDate)
         OR
-        -- Vadesi gelmemiş çekler: göster ama BekleyenCek=1 işaretle
         (t7.CheckKey IS NOT NULL AND t0.DueDate > @RefDate AND t3.RefDate <= @RefDate)
       )
     ORDER BY t0.DueDate, t0.TransId, t0.Line_ID
-  `;
-
-  const result = await request.query(query);
-  const rows   = result.recordset;
+  `, { CardCode: cardCode, RefDate: refDate }, dbName);
 
   if (!rows.length) {
     return {
@@ -204,13 +165,7 @@ async function getCariEkstre({ cardCode, refDate, dbName }) {
 // Vadesi geçmiş tüm müşteriler (özet)
 // ─────────────────────────────────────────────────────────────
 async function getVadesiGecenler({ refDate, cardType, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-
-  request.input('RefDate',  sql.Date,       refDate);
-  request.input('CardType', sql.VarChar(1), cardType || 'C');
-
-  const query = `
+  return await execute(`
     SELECT
       t0.ShortName        AS CardCode,
       t5.CardName,
@@ -229,60 +184,53 @@ async function getVadesiGecenler({ refDate, cardType, dbName }) {
     GROUP BY t0.ShortName, t5.CardName, t5.Currency
     HAVING SUM(t0.Debit) - SUM(t0.Credit) > 0
     ORDER BY BakiyeTRY DESC
-  `;
-
-  const result = await request.query(query);
-  return result.recordset;
+  `, { RefDate: refDate, CardType: cardType || 'C' }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Teknik Servis Hizmet Çağrıları — BE1_B2BLASTHIZMETSTATUS view
 //
 // Parametreler (hepsi opsiyonel, en az biri verilmeli):
-//   cardCode   → müşteri kodu (customer)
-//   serialNo   → seri no (internalSN)
-//   callId     → servis çağrı no (srvcCallID)
+//   cardCode     → müşteri kodu (customer)
+//   serialNo     → seri no (internalSN)
+//   callId       → servis çağrı no (srvcCallID)
 //   statusFilter → 'open' | 'closed' | null (hepsi)
-//   top        → kaç kayıt (default 20)
+//   top          → kaç kayıt (default 20)
 // ─────────────────────────────────────────────────────────────
 async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateFrom, dateTo, top = 20, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('Top', sql.Int, top);
-
+  const params     = { Top: Number(top) };
   const conditions = [];
 
   if (cardCode) {
-    request.input('CardCode', sql.NVarChar(50), cardCode);
+    params.CardCode = cardCode;
     conditions.push('customer = @CardCode');
   }
   if (serialNo) {
-    request.input('SerialNo', sql.NVarChar(50), `%${serialNo}%`);
+    params.SerialNo = `%${serialNo}%`;
     conditions.push('internalSN LIKE @SerialNo');
   }
   if (callId) {
-    request.input('CallId', sql.Int, parseInt(callId));
+    params.CallId = parseInt(callId);
     conditions.push('srvcCallID = @CallId');
   }
   if (dateFrom) {
-    request.input('DateFrom', sql.Date, new Date(dateFrom));
+    params.DateFrom = new Date(dateFrom);
     conditions.push('createDate >= @DateFrom');
   }
   if (dateTo) {
-    request.input('DateTo', sql.Date, new Date(dateTo));
+    params.DateTo = new Date(dateTo);
     conditions.push('createDate <= @DateTo');
   }
   // OSCS: -3=Açık(İşleniyor), -2=Beklemede, -1=Kapalı
   if (statusFilter === 'closed') {
-    conditions.push("status = -1");
+    conditions.push('status = -1');
   } else {
-    // open veya filtre yok → kapalıları getirme
-    conditions.push("status IN (-3, -2)");
+    conditions.push('status IN (-3, -2)');
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const query = `
+  return await execute(`
     SELECT TOP (@Top)
       customer        AS Musteri,
       srvcCallID      AS CagriNo,
@@ -304,10 +252,7 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateF
     FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
     ${where}
     ORDER BY createDate DESC
-  `;
-
-  const result = await request.query(query);
-  return result.recordset;
+  `, params, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -332,30 +277,26 @@ function upperTR(s) {
 }
 
 async function resolveCardCode({ cardName, currency, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-
   // Üç varyant: orijinal + Türkçe büyük (OKSİD) + ASCII büyük (OKSID)
-  request.input('Name1', sql.NVarChar(100), `%${cardName}%`);
-  request.input('Name2', sql.NVarChar(100), `%${upperTR(cardName)}%`);
-  request.input('Name3', sql.NVarChar(100), `%${cardName.toUpperCase()}%`);
+  const params = {
+    Name1: `%${cardName}%`,
+    Name2: `%${upperTR(cardName)}%`,
+    Name3: `%${cardName.toUpperCase()}%`,
+  };
 
   let currencyClause = '';
   if (currency) {
-    request.input('Currency', sql.NVarChar(10), currency.toUpperCase());
+    params.Currency = currency.toUpperCase();
     currencyClause = 'AND Currency = @Currency';
   }
 
-  const query = `
+  const records = await execute(`
     SELECT TOP 10 CardCode, CardName, Currency
     FROM OCRD WITH(NOLOCK)
     WHERE (CardName LIKE @Name1 OR CardName LIKE @Name2 OR CardName LIKE @Name3)
       ${currencyClause}
     ORDER BY CardName
-  `;
-
-  const result  = await request.query(query);
-  const records = result.recordset;
+  `, params, dbName);
 
   if (records.length === 0) return { found: 'none' };
   if (records.length === 1) return { found: 'one', record: records[0] };
@@ -369,10 +310,7 @@ async function resolveCardCode({ cardName, currency, dbName }) {
 // Durum değişikliği karşılaştırması için tüm kayıtları döndürür.
 // ─────────────────────────────────────────────────────────────
 async function getServisGuncellemeleri({ dbName } = {}) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-
-  const query = `
+  return await execute(`
     SELECT TOP 500
       srvcCallID  AS CagriNo,
       customer    AS Musteri,
@@ -384,10 +322,7 @@ async function getServisGuncellemeleri({ dbName } = {}) {
       createDate  AS AcilisTarihi
     FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
     ORDER BY createDate DESC
-  `;
-
-  const result = await request.query(query);
-  return result.recordset;
+  `, {}, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -397,10 +332,7 @@ async function getServisGuncellemeleri({ dbName } = {}) {
 // ve atanmış onaylayıcı kullanıcıları döndürür.
 // ─────────────────────────────────────────────────────────────
 async function getOnayBekleyenler({ dbName } = {}) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-
-  const query = `
+  return await execute(`
     SELECT
       d.WddCode,
       ISNULL(dr.DocNum, d.WddCode)                     AS DocNum,
@@ -465,60 +397,43 @@ async function getOnayBekleyenler({ dbName } = {}) {
       AND u.PortNum <> ''
       AND CAST(d.CreateDate AS DATE) >= CAST(GETDATE() AS DATE)
     ORDER BY d.CreateDate DESC
-  `;
-
-  const result = await request.query(query);
-  return result.recordset;
+  `, {}, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
 // OCPR İlgili Kişiler: Cellolar/Tel1/Tel2 → CardCode bul
 // ─────────────────────────────────────────────────────────────
 async function getCustomerByPhone(phone10, dbName) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('Phone', sql.NVarChar(20), `%${phone10}`);
-
-  const result = await request.query(`
+  const rows = await execute(`
     SELECT TOP 1 c.CardCode, c.Name AS ContactName, bp.CardName
     FROM OCPR c WITH(NOLOCK)
     LEFT JOIN OCRD bp WITH(NOLOCK) ON c.CardCode = bp.CardCode
     WHERE c.Cellolar LIKE @Phone
        OR c.Tel1     LIKE @Phone
        OR c.Tel2     LIKE @Phone
-  `);
+  `, { Phone: `%${phone10}` }, dbName);
 
-  return result.recordset[0] || null;
+  return rows[0] || null;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Telefon numarasına göre OUSR kaydını getir
 // ─────────────────────────────────────────────────────────────
 async function getUserByPhone(phone10, dbName) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('Phone', sql.NVarChar(20), `%${phone10}`);
-
-  const result = await request.query(`
+  const rows = await execute(`
     SELECT TOP 1 USER_CODE, U_NAME, PortNum, Language
     FROM OUSR WITH(NOLOCK)
     WHERE PortNum LIKE @Phone
-  `);
+  `, { Phone: `%${phone10}` }, dbName);
 
-  return result.recordset[0] || null;
+  return rows[0] || null;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Ürün kategorisine göre satış tutarları — OINV + INV1 + OITM + OITB
 // ─────────────────────────────────────────────────────────────
 async function getSatisByKategori({ startDate, endDate, top = 5, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('StartDate', sql.Date, startDate);
-  request.input('EndDate',   sql.Date, endDate);
-  request.input('Top',       sql.Int,  Number(top));
-
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       ISNULL(g.ItmsGrpNam, 'Diğer')        AS Kategori,
       ISNULL(s.SlpName, 'Belirtilmemiş')    AS SatisTemsilcisi,
@@ -534,22 +449,14 @@ async function getSatisByKategori({ startDate, endDate, top = 5, dbName }) {
       AND h.CANCELED = 'N'
     GROUP BY g.ItmsGrpNam, s.SlpName
     ORDER BY ToplamSatis DESC
-  `);
-
-  return result.recordset;
+  `, { StartDate: startDate, EndDate: endDate, Top: Number(top) }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Marka bazlı satış tutarları — OINV + INV1 + OITM (U_BE1_MARKAKODU)
 // ─────────────────────────────────────────────────────────────
 async function getSatisByMarka({ startDate, endDate, top = 5, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('StartDate', sql.Date, startDate);
-  request.input('EndDate',   sql.Date, endDate);
-  request.input('Top',       sql.Int,  Number(top));
-
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       ISNULL(i.U_BE1_MARKAKODU, 'Belirtilmemiş') AS Marka,
       ISNULL(s.SlpName, 'Belirtilmemiş')          AS SatisTemsilcisi,
@@ -564,22 +471,14 @@ async function getSatisByMarka({ startDate, endDate, top = 5, dbName }) {
       AND h.CANCELED = 'N'
     GROUP BY i.U_BE1_MARKAKODU, s.SlpName
     ORDER BY ToplamSatis DESC
-  `);
-
-  return result.recordset;
+  `, { StartDate: startDate, EndDate: endDate, Top: Number(top) }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Satış temsilcisi bazlı satış tutarları — OINV + OSLP
 // ─────────────────────────────────────────────────────────────
 async function getSatisByTemsilci({ startDate, endDate, top = 10, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('StartDate', sql.Date, startDate);
-  request.input('EndDate',   sql.Date, endDate);
-  request.input('Top',       sql.Int,  Number(top));
-
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       ISNULL(s.SlpName, 'Belirtilmemiş') AS SatisTemsilcisi,
       SUM(h.DocTotal)                     AS ToplamSatis,
@@ -591,9 +490,7 @@ async function getSatisByTemsilci({ startDate, endDate, top = 10, dbName }) {
       AND h.CANCELED = 'N'
     GROUP BY s.SlpName
     ORDER BY ToplamSatis DESC
-  `);
-
-  return result.recordset;
+  `, { StartDate: startDate, EndDate: endDate, Top: Number(top) }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -601,18 +498,16 @@ async function getSatisByTemsilci({ startDate, endDate, top = 10, dbName }) {
 // startDate/endDate verilmezse tüm zamanlar kontrol edilir
 // ─────────────────────────────────────────────────────────────
 async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('Top', sql.Int, Number(top));
+  const params     = { Top: Number(top) };
+  let   dateFilter = '';
 
-  let dateFilter = '';
   if (startDate && endDate) {
-    request.input('StartDate', sql.Date, startDate);
-    request.input('EndDate',   sql.Date, endDate);
+    params.StartDate = startDate;
+    params.EndDate   = endDate;
     dateFilter = 'AND h.DocDate >= @StartDate AND h.DocDate <= @EndDate';
   }
 
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       i.ItemCode,
       i.ItemName                             AS UrunAdi,
@@ -637,9 +532,7 @@ async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
     GROUP BY i.ItemCode, i.ItemName, g.ItmsGrpNam, i.U_BE1_MARKAKODU, i.SalUnitMsr
     HAVING SUM(ISNULL(w.OnHand, 0)) > 0
     ORDER BY StokMiktari DESC
-  `);
-
-  return result.recordset;
+  `, params, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -651,13 +544,7 @@ async function getStokSatissiz({ startDate, endDate, top = 20, dbName }) {
 //   top        → Kaç kayıt (default 30)
 // ─────────────────────────────────────────────────────────────
 async function getStokFiyatListesi({ filter, priceList = 1, top = 30, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('Filter',    sql.NVarChar(100), `%${filter || ''}%`);
-  request.input('PriceList', sql.Int,           Number(priceList) || 1);
-  request.input('Top',       sql.Int,           Number(top)       || 30);
-
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       i.ItemCode,
       i.ItemName,
@@ -681,9 +568,7 @@ async function getStokFiyatListesi({ filter, priceList = 1, top = 30, dbName }) 
     GROUP BY i.ItemCode, i.ItemName, i.U_BE1_MARKAKODU, i.SalUnitMsr, p.Price, p.Currency
     HAVING SUM(ISNULL(w.OnHand, 0)) > 0
     ORDER BY i.ItemName
-  `);
-
-  return result.recordset;
+  `, { Filter: `%${filter || ''}%`, PriceList: Number(priceList) || 1, Top: Number(top) || 30 }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -695,13 +580,7 @@ async function getStokFiyatListesi({ filter, priceList = 1, top = 30, dbName }) 
 //   top       → kaç kayıt (default 200)
 // ─────────────────────────────────────────────────────────────
 async function getStokSeriListesi({ cardCode, whsCode, top = 200, dbName }) {
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  request.input('CardCode', sql.NVarChar(50), cardCode);
-  request.input('WhsCode',  sql.NVarChar(10), whsCode);
-  request.input('Top',      sql.Int,          Number(top));
-
-  const result = await request.query(`
+  return await execute(`
     SELECT TOP (@Top)
       CardCode,
       CardName,
@@ -717,9 +596,7 @@ async function getStokSeriListesi({ cardCode, whsCode, top = 200, dbName }) {
     WHERE CardCode = @CardCode
       AND WhsCode  = @WhsCode
     ORDER BY ItemCode, DistNumber
-  `);
-
-  return result.recordset;
+  `, { CardCode: cardCode, WhsCode: whsCode, Top: Number(top) }, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -730,10 +607,7 @@ async function runRawQuery(queryText, dbName) {
   if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
     throw new Error('Güvenlik: Yalnızca SELECT ve WITH sorguları çalıştırılabilir.');
   }
-  const pool    = await getPool(dbName);
-  const request = pool.request();
-  const result  = await request.query(queryText);
-  return result.recordset;
+  return await execute(queryText, {}, dbName);
 }
 
 module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, runRawQuery };
