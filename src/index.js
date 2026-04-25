@@ -9,6 +9,7 @@ const adminRouter = require('./admin/adminRouter');
 const serviceNotifier  = require('./jobs/serviceNotifier');
 const approvalNotifier = require('./jobs/approvalNotifier');
 const taskService      = require('./services/taskService');
+const docNotifier      = require('./jobs/docNotifier');
 const { logMessage }  = require('./services/messageLogger');
 const { transcribeVoice } = require('./services/voiceHandler');
 const { sendText }    = require('./services/whatsappService');
@@ -205,4 +206,5 @@ app.listen(config.port, () => {
   serviceNotifier.start();
   approvalNotifier.start();
   taskService.start();
+  docNotifier.start();
 });

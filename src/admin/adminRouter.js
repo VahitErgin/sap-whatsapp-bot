@@ -16,6 +16,7 @@ const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
 const { testConnection: graphTestConnection } = require('../services/graphService');
 const { getStats, addUser, updateUser, removeUser } = require('../services/userRegistry');
 const { getLicenseInfo, importLicense, getFingerprint } = require('../services/licenseService');
+const { loadState: loadDocNotifState, saveState: saveDocNotifState } = require('../jobs/docNotifier');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -474,6 +475,44 @@ router.post('/api/change-admin-username', requireAuth, (req, res) => {
   const cfg = getAdminCfg();
   cfg.username = username.trim();
   saveAdminCfg(cfg);
+  res.json({ ok: true });
+});
+
+// ─── Belge Bildirim Servisi (docNotifier) ────────────────────
+router.get('/api/doc-notifier', requireAuth, (_req, res) => {
+  res.json(loadDocNotifState());
+});
+
+router.post('/api/doc-notifier', requireAuth, (req, res) => {
+  const current = loadDocNotifState();
+  const body    = req.body || {};
+
+  const next = {
+    ...current,
+    enabled: !!body.enabled,
+    templates: {
+      efatura:  (body.templates?.efatura  || '').trim(),
+      earsiv:   (body.templates?.earsiv   || '').trim(),
+      irsaliye: (body.templates?.irsaliye || '').trim(),
+    },
+    excludedPhones: Array.isArray(body.excludedPhones)
+      ? body.excludedPhones.map(p => String(p).trim()).filter(Boolean)
+      : (body.excludedPhonesText || '')
+          .split('\n')
+          .map(p => p.trim())
+          .filter(Boolean),
+  };
+  saveDocNotifState(next);
+  res.json({ ok: true });
+});
+
+// Son DocEntry değerlerini sıfırla (tüm geçmiş belgeleri yeniden göndermemek için)
+router.post('/api/doc-notifier/reset-entries', requireAuth, (req, res) => {
+  const current = loadDocNotifState();
+  const body    = req.body || {};
+  if (body.invoice  !== undefined) current.lastInvoiceEntry  = Number(body.invoice)  || 0;
+  if (body.delivery !== undefined) current.lastDeliveryEntry = Number(body.delivery) || 0;
+  saveDocNotifState(current);
   res.json({ ok: true });
 });
 

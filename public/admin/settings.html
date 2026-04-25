@@ -412,6 +412,69 @@
         </div>
       </div>
 
+      <!-- Belge Bildirim Servisi -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-file-earmark-arrow-up me-1" style="color:#6cb2eb"></i>
+            <span>Fatura / İrsaliye WhatsApp Bildirimi</span>
+            <span class="badge ms-auto small" id="docNotifBadge">Pasif</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              SAP'ta yeni fatura veya irsaliye kesildiğinde <strong>OCRD.Cellular</strong> alanındaki
+              telefona otomatik WhatsApp template bildirimi gönderir. Her 3 dakikada poll eder.<br>
+              Template parametreleri: <code>{{1}}</code> Müşteri adı · <code>{{2}}</code> Belge no ·
+              <code>{{3}}</code> Tutar · <code>{{4}}</code> Görüntüleme linki (U_BE1_UUID)
+            </p>
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="docNotifEnabled">
+                  <label class="form-check-label fw-semibold small" for="docNotifEnabled">Belge Bildirimi Aktif</label>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">e-Fatura Template Adı</label>
+                <input type="text" class="form-control form-control-sm" id="docTplEfatura" placeholder="efatura_bildirimi">
+                <div class="form-text">Profile 1-4, 7 → e-Fatura</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">e-Arşiv Template Adı</label>
+                <input type="text" class="form-control form-control-sm" id="docTplEarsiv" placeholder="earsiv_bildirimi">
+                <div class="form-text">Profile 5 (EARSIVFATURA) → e-Arşiv</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">İrsaliye Template Adı</label>
+                <input type="text" class="form-control form-control-sm" id="docTplIrsaliye" placeholder="irsaliye_bildirimi">
+                <div class="form-text">ODLN tablosu → İrsaliye</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small">Hariç Tutulacak Telefon Numaraları <span class="text-muted fw-normal">(satır satır)</span></label>
+                <textarea class="form-control form-control-sm font-monospace" id="docNotifExcluded"
+                  rows="3" placeholder="905551234567&#10;905559876543"></textarea>
+                <div class="form-text">Bu numaralara bildirim gönderilmez.</div>
+              </div>
+              <div class="col-12 d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-primary btn-sm" onclick="saveDocNotifSettings()">
+                  <i class="bi bi-floppy me-1"></i>Kaydet
+                </button>
+                <div class="vr"></div>
+                <div class="text-muted small" id="docNotifLastRun"></div>
+                <div class="vr"></div>
+                <span class="text-muted small">Son Fatura Entry:</span>
+                <input type="number" class="form-control form-control-sm" id="docNotifLastInv" style="width:110px" min="0">
+                <span class="text-muted small">Son İrsaliye Entry:</span>
+                <input type="number" class="form-control form-control-sm" id="docNotifLastDel" style="width:110px" min="0">
+                <button class="btn btn-outline-secondary btn-sm" onclick="resetDocEntries()">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Entry Sıfırla
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Bildirim & Diğer -->
       <div class="col-md-6">
         <div class="card h-100">
@@ -899,10 +962,60 @@ async function testGraph() {
   }
 }
 
+async function loadDocNotifSettings() {
+  try {
+    const res  = await fetch('/admin/api/doc-notifier');
+    const data = await res.json();
+    document.getElementById('docNotifEnabled').checked   = !!data.enabled;
+    document.getElementById('docTplEfatura').value       = data.templates?.efatura   || '';
+    document.getElementById('docTplEarsiv').value        = data.templates?.earsiv    || '';
+    document.getElementById('docTplIrsaliye').value      = data.templates?.irsaliye  || '';
+    document.getElementById('docNotifExcluded').value    = (data.excludedPhones || []).join('\n');
+    document.getElementById('docNotifLastInv').value     = data.lastInvoiceEntry  || 0;
+    document.getElementById('docNotifLastDel').value     = data.lastDeliveryEntry || 0;
+    document.getElementById('docNotifLastRun').textContent =
+      data.lastRun ? `Son çalışma: ${new Date(data.lastRun).toLocaleString('tr-TR')}` : 'Henüz çalışmadı';
+    const badge = document.getElementById('docNotifBadge');
+    badge.textContent = data.enabled ? 'Aktif' : 'Pasif';
+    badge.className = 'badge ms-auto small ' + (data.enabled ? 'bg-success' : 'bg-secondary');
+  } catch { /* yoksay */ }
+}
+
+async function saveDocNotifSettings() {
+  const body = {
+    enabled: document.getElementById('docNotifEnabled').checked,
+    templates: {
+      efatura:  document.getElementById('docTplEfatura').value.trim(),
+      earsiv:   document.getElementById('docTplEarsiv').value.trim(),
+      irsaliye: document.getElementById('docTplIrsaliye').value.trim(),
+    },
+    excludedPhonesText: document.getElementById('docNotifExcluded').value,
+  };
+  const res  = await fetch('/admin/api/doc-notifier', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok) { showAlert('Belge bildirim ayarları kaydedildi'); loadDocNotifSettings(); }
+  else showAlert(data.error || 'Hata', 'danger');
+}
+
+async function resetDocEntries() {
+  if (!confirm('Son DocEntry değerleri güncellenecek. Emin misin?')) return;
+  const body = {
+    invoice:  parseInt(document.getElementById('docNotifLastInv').value) || 0,
+    delivery: parseInt(document.getElementById('docNotifLastDel').value) || 0,
+  };
+  const res  = await fetch('/admin/api/doc-notifier/reset-entries', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (res.ok) { showAlert('Entry değerleri güncellendi'); loadDocNotifSettings(); }
+}
+
 loadSettings();
 loadEdocSettings();
 loadLangSettings();
 loadGraphSettings();
+loadDocNotifSettings();
 </script>
 </body>
 </html>
