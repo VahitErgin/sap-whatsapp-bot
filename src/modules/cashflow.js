@@ -62,7 +62,7 @@ YANIT FORMATI (sadece JSON, başka hiçbir şey yazma):
       "method": "GET",
       "params": {
         "$filter": "DocumentStatus eq 'bost_Open' and CardCode eq 'C001'",
-        "$select": "DocNum,CardName,DocTotal,DocDueDate",
+        "$select": "DocNum,NumAtCard,CardName,DocDate,DocDueDate,DocTotal,DocumentStatus",
         "$orderby": "DocDueDate asc",
         "$top": "10"
       },
@@ -868,6 +868,7 @@ function _edocTypeForEndpoint(endpoint) {
 function _fmtODataRow(row) {
   const p = [];
   if (row.DocNum)    p.push(`#${row.DocNum}`);
+  if (row.NumAtCard) p.push(`(${row.NumAtCard})`);
   if (row.CardName)  p.push(`*${row.CardName}*`);
   if (row.DocDate)   p.push(fmtDate(row.DocDate));
   if (row.DocDueDate) p.push(`Vade: ${fmtDate(row.DocDueDate)}`);
