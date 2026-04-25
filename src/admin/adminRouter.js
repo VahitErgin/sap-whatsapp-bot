@@ -506,15 +506,6 @@ router.post('/api/doc-notifier', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Son DocEntry değerlerini sıfırla (tüm geçmiş belgeleri yeniden göndermemek için)
-router.post('/api/doc-notifier/reset-entries', requireAuth, (req, res) => {
-  const current = loadDocNotifState();
-  const body    = req.body || {};
-  if (body.invoice  !== undefined) current.lastInvoiceEntry  = Number(body.invoice)  || 0;
-  if (body.delivery !== undefined) current.lastDeliveryEntry = Number(body.delivery) || 0;
-  saveDocNotifState(current);
-  res.json({ ok: true });
-});
 
 router.post('/api/change-password', requireAuth, (req, res) => {
   const { currentPassword, newPassword } = req.body || {};

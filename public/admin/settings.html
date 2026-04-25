@@ -459,16 +459,7 @@
                 <button class="btn btn-primary btn-sm" onclick="saveDocNotifSettings()">
                   <i class="bi bi-floppy me-1"></i>Kaydet
                 </button>
-                <div class="vr"></div>
                 <div class="text-muted small" id="docNotifLastRun"></div>
-                <div class="vr"></div>
-                <span class="text-muted small">Son Fatura Entry:</span>
-                <input type="number" class="form-control form-control-sm" id="docNotifLastInv" style="width:110px" min="0">
-                <span class="text-muted small">Son İrsaliye Entry:</span>
-                <input type="number" class="form-control form-control-sm" id="docNotifLastDel" style="width:110px" min="0">
-                <button class="btn btn-outline-secondary btn-sm" onclick="resetDocEntries()">
-                  <i class="bi bi-arrow-counterclockwise me-1"></i>Entry Sıfırla
-                </button>
               </div>
             </div>
           </div>
@@ -971,8 +962,6 @@ async function loadDocNotifSettings() {
     document.getElementById('docTplEarsiv').value        = data.templates?.earsiv    || '';
     document.getElementById('docTplIrsaliye').value      = data.templates?.irsaliye  || '';
     document.getElementById('docNotifExcluded').value    = (data.excludedPhones || []).join('\n');
-    document.getElementById('docNotifLastInv').value     = data.lastInvoiceEntry  || 0;
-    document.getElementById('docNotifLastDel').value     = data.lastDeliveryEntry || 0;
     document.getElementById('docNotifLastRun').textContent =
       data.lastRun ? `Son çalışma: ${new Date(data.lastRun).toLocaleString('tr-TR')}` : 'Henüz çalışmadı';
     const badge = document.getElementById('docNotifBadge');
@@ -999,17 +988,6 @@ async function saveDocNotifSettings() {
   else showAlert(data.error || 'Hata', 'danger');
 }
 
-async function resetDocEntries() {
-  if (!confirm('Son DocEntry değerleri güncellenecek. Emin misin?')) return;
-  const body = {
-    invoice:  parseInt(document.getElementById('docNotifLastInv').value) || 0,
-    delivery: parseInt(document.getElementById('docNotifLastDel').value) || 0,
-  };
-  const res  = await fetch('/admin/api/doc-notifier/reset-entries', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-  if (res.ok) { showAlert('Entry değerleri güncellendi'); loadDocNotifSettings(); }
-}
 
 loadSettings();
 loadEdocSettings();
