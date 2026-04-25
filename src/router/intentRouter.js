@@ -21,6 +21,7 @@ const config = require('../config/config');
 const { sendText, sendButtons } = require('../services/whatsappService');
 const { writeLog }   = require('../services/logService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
+const { isAllowed, isEnabled }         = require('../services/userRegistry');
 const { loginUser }  = require('../modules/sapAuth');
 const { t, langInstruction } = require('../services/i18n');
 const { getLang, setLang }   = require('../services/langService');
@@ -57,6 +58,14 @@ async function handleIncoming({ from, text }) {
   const upper = text.toUpperCase().trim();
 
   try {
+    // ── 0. Kullanıcı kayıt kontrolü (MAX_USERS aktifse) ──────
+    if (isEnabled() && !isAllowed(from)) {
+      console.log(`[Router] Kayıtsız numara reddedildi: ${from}`);
+      return await sendText(from,
+        '🔒 Bu sistem yalnızca kayıtlı kullanıcılara açıktır.\n\nErişim için sistem yöneticinizle iletişime geçin.'
+      );
+    }
+
     // ── 1. Şifre bekleme modu — Claude'a gitmeden yakala ─────
     const awaitingPw = getAwaitingPassword(from);
     if (awaitingPw) {

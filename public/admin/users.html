@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kullanıcılar – SAP WA Bot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="d-flex">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <i class="bi bi-robot sidebar-logo"></i>
+      <div>
+        <div class="sidebar-title">SAP WA Bot</div>
+        <div class="sidebar-sub">Yönetim Paneli</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="/admin/users"     class="nav-link active"><i class="bi bi-people"></i> Kullanıcılar</a>
+      <a href="/admin/approvers" class="nav-link"><i class="bi bi-person-check"></i> Onay Yetkilileri</a>
+      <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/tasks"     class="nav-link"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/logs"      class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
+      <a href="/admin/settings"  class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" style="color:rgba(255,100,100,.7);text-decoration:none;font-size:.8rem">
+        <i class="bi bi-box-arrow-right me-1"></i>Çıkış Yap
+      </a>
+    </div>
+  </div>
+
+  <!-- İçerik -->
+  <div id="content">
+    <div class="page-header">
+      <div>
+        <h4 class="mb-0"><i class="bi bi-people me-2" style="color:#6cb2eb"></i>Kullanıcılar</h4>
+        <div id="licenseBar" class="mt-1" style="font-size:.8rem;color:#94a3b8"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddModal()">
+        <i class="bi bi-plus-lg me-1"></i>Kullanıcı Ekle
+      </button>
+    </div>
+
+    <div id="limitAlert" class="alert alert-warning d-none mb-3 py-2">
+      <i class="bi bi-exclamation-triangle me-2"></i>
+      <span id="limitAlertMsg"></span>
+    </div>
+
+    <div id="infoBox" class="alert alert-info py-2 mb-3 d-none">
+      <i class="bi bi-info-circle me-2"></i>
+      <strong>MAX_USERS tanımlı değil</strong> — Şu an tüm numaralar erişebilir.
+      Kullanıcı kısıtlaması için <code>.env</code> dosyasına <code>MAX_USERS=20</code> ekleyin.
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-list-ul me-2"></i>Kayıtlı Kullanıcılar</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="load()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th>Telefon</th>
+              <th>Ad Soyad</th>
+              <th>Eklenme</th>
+              <th>Durum</th>
+              <th style="width:100px">İşlem</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr><td colspan="5" class="text-center py-3">
+              <span class="spinner-border spinner-border-sm"></span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Kullanıcı Ekle Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-semibold">Kullanıcı Ekle</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="addAlert" class="alert alert-danger py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Telefon Numarası <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="addPhone" placeholder="905XXXXXXXXX">
+          <div class="form-text">Ülke kodu dahil, + olmadan (örn: 905001234567)</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Ad Soyad</label>
+          <input type="text" class="form-control" id="addName" placeholder="Ahmet Yılmaz">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary btn-sm" onclick="addUser()">
+          <i class="bi bi-plus-lg me-1"></i>Ekle
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sil Onay Modal -->
+<div class="modal fade" id="delModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4">
+        <i class="bi bi-exclamation-triangle text-danger" style="font-size:2rem"></i>
+        <div class="mt-2 fw-semibold">Kullanıcıyı kaldır?</div>
+        <div class="text-muted small mt-1" id="delLabel"></div>
+        <div class="text-danger small mt-1">Kişi bir daha bota mesaj gönderemez.</div>
+      </div>
+      <div class="modal-footer justify-content-center">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-danger btn-sm" id="confirmDelBtn">
+          <i class="bi bi-trash me-1"></i>Kaldır
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/admin/admin-i18n.js"></script>
+<script>
+let _pendingDel = null;
+
+async function load() {
+  const res  = await fetch('/admin/api/users');
+  const data = await res.json();
+
+  // Lisans bar
+  const bar = document.getElementById('licenseBar');
+  if (!data.limited) {
+    document.getElementById('infoBox').classList.remove('d-none');
+    bar.textContent = '';
+  } else {
+    document.getElementById('infoBox').classList.add('d-none');
+    const pct  = Math.round((data.count / data.max) * 100);
+    const cls  = pct >= 100 ? 'text-danger' : pct >= 80 ? 'text-warning' : 'text-success';
+    bar.innerHTML = `<span class="${cls} fw-semibold">${data.count} / ${data.max}</span> kullanıcı lisansı kullanıldı`;
+
+    const alertEl = document.getElementById('limitAlert');
+    if (data.count >= data.max) {
+      document.getElementById('limitAlertMsg').textContent =
+        `Lisans limitine ulaşıldı (${data.max} kullanıcı). Yeni kullanıcı eklemek için paketi yükseltin.`;
+      alertEl.classList.remove('d-none');
+    } else {
+      alertEl.classList.add('d-none');
+    }
+  }
+
+  // Tablo
+  const tbody = document.getElementById('tableBody');
+  if (!data.users || !data.users.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">
+      <i class="bi bi-people" style="font-size:2rem;opacity:.3"></i>
+      <p class="mt-2 mb-0">Henüz kayıtlı kullanıcı yok.</p>
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.users.map(u => {
+    const date = u.addedAt ? new Date(u.addedAt).toLocaleDateString('tr-TR') : '—';
+    const enabled = u.enabled !== false;
+    return `
+      <tr class="${enabled ? '' : 'opacity-50'}">
+        <td class="font-monospace">${esc(u.phone)}</td>
+        <td>${esc(u.name || '—')}</td>
+        <td style="font-size:.82rem;color:#94a3b8">${date}</td>
+        <td>
+          <span class="badge ${enabled ? 'bg-success' : 'bg-secondary'}" style="font-size:.72rem">
+            ${enabled ? 'Aktif' : 'Pasif'}
+          </span>
+        </td>
+        <td>
+          <div class="d-flex gap-1">
+            <button class="btn btn-outline-${enabled ? 'warning' : 'success'} btn-sm py-0 px-2"
+              title="${enabled ? 'Pasife Al' : 'Aktif Et'}"
+              onclick="toggleUser('${esc(u.phone)}', ${!enabled})">
+              <i class="bi bi-${enabled ? 'pause' : 'play'}"></i>
+            </button>
+            <button class="btn btn-outline-danger btn-sm py-0 px-2" title="Kaldır"
+              onclick="confirmDelete('${esc(u.phone)}', '${esc(u.name || u.phone)}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+function openAddModal() {
+  document.getElementById('addPhone').value = '';
+  document.getElementById('addName').value  = '';
+  document.getElementById('addAlert').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('addModal')).show();
+}
+
+async function addUser() {
+  const phone   = document.getElementById('addPhone').value.trim();
+  const name    = document.getElementById('addName').value.trim();
+  const alertEl = document.getElementById('addAlert');
+  alertEl.classList.add('d-none');
+
+  if (!phone) { alertEl.textContent = 'Telefon numarası zorunlu'; alertEl.classList.remove('d-none'); return; }
+
+  const res  = await fetch('/admin/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, name }),
+  });
+  const data = await res.json();
+  if (!res.ok) { alertEl.textContent = data.error; alertEl.classList.remove('d-none'); return; }
+
+  bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
+  load();
+}
+
+async function toggleUser(phone, enabled) {
+  await fetch(`/admin/api/users/${encodeURIComponent(phone)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  load();
+}
+
+function confirmDelete(phone, label) {
+  _pendingDel = phone;
+  document.getElementById('delLabel').textContent = `${label} (${phone})`;
+  new bootstrap.Modal(document.getElementById('delModal')).show();
+}
+
+document.getElementById('confirmDelBtn').addEventListener('click', async () => {
+  if (!_pendingDel) return;
+  await fetch(`/admin/api/users/${encodeURIComponent(_pendingDel)}`, { method: 'DELETE' });
+  bootstrap.Modal.getInstance(document.getElementById('delModal')).hide();
+  _pendingDel = null;
+  load();
+});
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+load();
+</script>
+</body>
+</html>

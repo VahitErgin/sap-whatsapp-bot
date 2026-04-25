@@ -14,6 +14,7 @@ const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('.
 const { getEdocConfig, saveEdocConfig } = require('../services/edocumentService');
 const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
 const { testConnection: graphTestConnection } = require('../services/graphService');
+const { getStats, addUser, updateUser, removeUser } = require('../services/userRegistry');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -43,6 +44,8 @@ function saveAdminCfg(cfg) {
 // ─────────────────────────────────────────────────────────────
 // HTML Sayfaları
 // ─────────────────────────────────────────────────────────────
+
+router.get('/users', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'users.html')));
 
 router.get('/login', (req, res) => {
   if (req.session?.admin) return res.redirect('/admin');
@@ -212,6 +215,7 @@ router.get('/api/settings', requireAuth, (req, res) => {
     // Bildirim & Diğer
     SERVIS_NOTIF_TEMPLATE:   env.SERVIS_NOTIF_TEMPLATE     || '',
     STOCK_PRICE_LIST:        env.STOCK_PRICE_LIST           || '1',
+    MAX_USERS:               env.MAX_USERS                  || '',
     // Admin
     ADMIN_USERNAME:          getAdminCfg().username        || 'admin',
   });
@@ -328,6 +332,39 @@ router.post('/api/lang-settings', requireAuth, (req, res) => {
 router.delete('/api/lang-settings/:phone', requireAuth, (req, res) => {
   deleteLang(req.params.phone);
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – Kullanıcı Kayıt Defteri
+// ─────────────────────────────────────────────────────────────
+router.get('/api/users', requireAuth, (_req, res) => {
+  res.json(getStats());
+});
+
+router.post('/api/users', requireAuth, (req, res) => {
+  const { phone, name } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'Telefon numarası zorunlu' });
+  try {
+    res.json(addUser({ phone, name }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/api/users/:phone', requireAuth, (req, res) => {
+  try {
+    res.json(updateUser(req.params.phone, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/api/users/:phone', requireAuth, (req, res) => {
+  try {
+    res.json(removeUser(req.params.phone));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
