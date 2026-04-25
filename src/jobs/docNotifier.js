@@ -137,10 +137,20 @@ async function tick() {
   const state  = loadState();
   if (!state.enabled) return;
 
-  const dbName = config.sapDb.database;
+  const today  = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   let   dirty  = false;
 
-  // OINV: yeni faturalar
+  // Gece yarısı geçilmişse sayaçları sıfırla — sadece o günün belgeleri işlensin
+  if (state.lastRunDate !== today) {
+    state.lastInvoiceEntry  = 0;
+    state.lastDeliveryEntry = 0;
+    state.lastRunDate       = today;
+    dirty = true;
+  }
+
+  const dbName = config.sapDb.database;
+
+  // OINV: bugünkü yeni faturalar
   try {
     const invoices = await execute(`
       SELECT DocEntry, DocNum, CardCode, CardName, DocDate, DocTotal, DocCur,
@@ -149,6 +159,7 @@ async function tick() {
       FROM OINV WITH(NOLOCK)
       WHERE DocEntry > @LastEntry
         AND CANCELED = 'N'
+        AND CAST(DocDate AS DATE) = CAST(GETDATE() AS DATE)
       ORDER BY DocEntry ASC
     `, { LastEntry: state.lastInvoiceEntry || 0 }, dbName);
 
@@ -165,7 +176,7 @@ async function tick() {
     console.error('[DocNotifier] OINV poll hatası:', err.message);
   }
 
-  // ODLN: yeni irsaliyeler
+  // ODLN: bugünkü yeni irsaliyeler
   try {
     const deliveries = await execute(`
       SELECT DocEntry, DocNum, CardCode, CardName, DocDate, DocTotal, DocCur,
@@ -174,6 +185,7 @@ async function tick() {
       FROM ODLN WITH(NOLOCK)
       WHERE DocEntry > @LastEntry
         AND CANCELED = 'N'
+        AND CAST(DocDate AS DATE) = CAST(GETDATE() AS DATE)
       ORDER BY DocEntry ASC
     `, { LastEntry: state.lastDeliveryEntry || 0 }, dbName);
 
