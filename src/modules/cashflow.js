@@ -546,8 +546,9 @@ async function executeQueries(sl, queries, dbName) {
         }
       }
 
-      // Activities endpoint: CardName $filter içinde geçersiz → CardCode'a çevir
-      if (q.endpoint === 'Activities' && q.params?.['$filter']) {
+      // Tüm endpointler: $filter içinde CardName varsa CardCode'a çevir
+      // (Activities CardName'i desteklemez; diğerleri desteklese de exact-match sorun çıkarır)
+      if (q.params?.['$filter']) {
         const filterStr = q.params['$filter'];
         const nameMatch = filterStr.match(/contains\s*\(\s*CardName\s*,\s*'([^']+)'\s*\)/i)
                        || filterStr.match(/CardName\s+eq\s+'([^']+)'/i);
@@ -556,7 +557,7 @@ async function executeQueries(sl, queries, dbName) {
           const resolved = await resolveCardCode({ cardName: nameVal, dbName });
           if (resolved.found === 'one') {
             const cc = resolved.record.CardCode;
-            console.log(`[Cashflow] Activities CardName→CardCode: "${nameVal}" → ${cc}`);
+            console.log(`[Cashflow] ${q.endpoint} CardName→CardCode: "${nameVal}" → ${cc}`);
             q.params['$filter'] = filterStr
               .replace(/contains\s*\(\s*CardName\s*,[^)]+\)/gi, `CardCode eq '${cc}'`)
               .replace(/CardName\s+eq\s+'[^']*'/gi, `CardCode eq '${cc}'`);
