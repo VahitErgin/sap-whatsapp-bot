@@ -158,6 +158,27 @@ Stokta olan ürünlerin fiyat listesi (OITM + OITW + ITM1):
               "fiyat listesi", "hangi ürünler var fiyatıyla", "stok fiyatları"
   KRİTİK: Items endpoint KULLANMA — fiyat için SAP SL Items'da Price alanı yoktur, $expand desteklenmez
 
+PAZARLAMABELGESİ ENDPOİNTLERİ — Türkçe → SAP SL endpoint eşlemesi:
+
+SATIŞ BELGELERİ:
+  fatura / satış faturası / e-fatura     → Invoices
+  irsaliye / sevk irsaliyesi / teslimat  → DeliveryNotes
+  sipariş / satış siparişi               → Orders
+  teklif / satış teklifi / proforma      → Quotations
+  iade faturası / kredi notu (satış)     → CreditNotes
+  satış iadesi                           → Returns
+
+ALIŞ BELGELERİ:
+  alış faturası / tedarikçi faturası     → PurchaseInvoices
+  alış irsaliyesi / mal kabul            → PurchaseDeliveryNotes
+  satın alma siparişi / alış siparişi    → PurchaseOrders
+  alış teklifi / satın alma teklifi      → PurchaseQuotations
+  alış iade faturası / alış kredi notu   → PurchaseCreditNotes
+  alış iadesi                            → PurchaseReturns
+
+Tüm pazarlama belgelerinde kullanılacak $select (zorunlu alanlar):
+  DocNum, NumAtCard, CardCode, CardName, DocDate, DocDueDate, DocTotal, DocumentStatus
+
 KURALLAR:
 - Birden fazla sorgu gerekiyorsa queries dizisine ekle (max 3)
 - Cari adından CardCode bulmak için BusinessPartners + başka endpoint şeklinde 2 sorgu YAZMA.
@@ -179,11 +200,14 @@ clarification_needed: false kullan (ZORUNLU) şu durumlarda:
   → Kullanıcı konu belirttiyse (bakiye, fatura, stok vb.) → sorgula, SOR MA
 
 ÖRNEKLER — clarification_needed: false:
-- "OKSİD bakiyesi" → SQL_CARI_EKSTRE, cardName: "OKSİD"
-- "Endeks firması" → BusinessPartners, $filter: contains(CardName,'Endeks')
-- "ABC Teknoloji servisi" → SQL_HIZMET, cardName: "ABC Teknoloji"
-- "Veli Bey'in faturaları" → Invoices, $filter: contains(CardName,'Veli')
-- "C001" → SQL_CARI_EKSTRE, cardCode: "C001"  (tek kelime = bakiye sorgula)`;
+- "OKSİD bakiyesi"           → SQL_CARI_EKSTRE, cardName: "OKSİD"
+- "Endeks firması"            → BusinessPartners, $filter: contains(CardName,'Endeks')
+- "ABC Teknoloji servisi"     → SQL_HIZMET, cardName: "ABC Teknoloji"
+- "Veli Bey'in faturaları"   → Invoices, cardName: "Veli"
+- "OKSID irsaliyesi"         → DeliveryNotes, cardName: "OKSID"
+- "OKSID siparişleri"        → Orders, cardName: "OKSID"
+- "OKSID alış siparişi"      → PurchaseOrders, cardName: "OKSID"
+- "C001"                     → SQL_CARI_EKSTRE, cardCode: "C001"  (tek kelime = bakiye sorgula)`;
 
 // ─── Yerel formatter yardımcıları ─────────────────────────────
 const MONTHS_TR = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -858,10 +882,12 @@ function formatResultsLocal(_question, queries, results) {
 
 function _edocTypeForEndpoint(endpoint) {
   if (!endpoint) return null;
-  if (/^Invoices$/i.test(endpoint))      return 'efatura';   // OINV → efatura (yoksa earsiv fallback)
-  if (/DeliveryNote/i.test(endpoint))    return 'eirsaliye'; // ODLN
-  if (/^Returns$/i.test(endpoint))       return 'earsiv';    // ORDN
-  if (/^CreditNote/i.test(endpoint))     return 'earsiv';    // ORIN
+  if (/^Invoices$/i.test(endpoint))             return 'efatura';   // OINV
+  if (/^PurchaseInvoices$/i.test(endpoint))     return 'efatura';   // OPCH
+  if (/DeliveryNote/i.test(endpoint))           return 'eirsaliye'; // ODLN / OPDN
+  if (/^Returns$/i.test(endpoint))              return 'earsiv';    // ORDN
+  if (/^CreditNote/i.test(endpoint))            return 'earsiv';    // ORIN
+  if (/^PurchaseCreditNote/i.test(endpoint))    return 'earsiv';    // ORPC
   return null;
 }
 
