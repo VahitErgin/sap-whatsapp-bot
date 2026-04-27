@@ -261,6 +261,11 @@ function _norm(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
+function cancelServiceWizard(from) {
+  _wizard.delete(_norm(from));
+  _pending.delete(_norm(from));
+}
+
 module.exports = {
   handleCreateServiceCall,
   handleServiceWizardInput,
@@ -268,4 +273,5 @@ module.exports = {
   handleServicePriority,
   getServiceWizardState,
   confirmServiceCall,
+  cancelServiceWizard,
 };

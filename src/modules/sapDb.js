@@ -85,17 +85,30 @@ function calcWaterfall(rows) {
     }));
 
   const toplamTRY = acikKalemler.reduce((s, d) => s + d.KalanTRY, 0);
-  const toplamFC  = acikKalemler.reduce((s, d) => s + d.KalanFC,  0);
 
-  const bekleyenCekTRY = bekleyenCekler.reduce((s, r) => s + (Number(r.Credit)   || 0), 0);
-  const bekleyenCekFC  = bekleyenCekler.reduce((s, r) => s + (Number(r.FCCredit) || 0), 0);
+  // Döviz bazlı toplamlar: { 'USD': 500, 'EUR': 200 }
+  const toplamFC = {};
+  acikKalemler.forEach(d => {
+    if (d.KalanFC > 0.01 && d.ParaBirimi && d.ParaBirimi !== 'TRY') {
+      toplamFC[d.ParaBirimi] = Math.round(((toplamFC[d.ParaBirimi] || 0) + d.KalanFC) * 100) / 100;
+    }
+  });
+
+  const bekleyenCekTRY = bekleyenCekler.reduce((s, r) => s + (Number(r.Credit) || 0), 0);
+  const bekleyenCekFC  = {};
+  bekleyenCekler.forEach(r => {
+    const cur = r.FCCurrency;
+    if (cur && cur !== 'TRY' && Number(r.FCCredit) > 0) {
+      bekleyenCekFC[cur] = Math.round(((bekleyenCekFC[cur] || 0) + Number(r.FCCredit)) * 100) / 100;
+    }
+  });
 
   return {
     acikKalemler,
-    toplamTRY:      Math.round(toplamTRY * 100) / 100,
-    toplamFC:       Math.round(toplamFC  * 100) / 100,
-    bekleyenCekTRY: Math.round(bekleyenCekTRY * 100) / 100,
-    bekleyenCekFC:  Math.round(bekleyenCekFC  * 100) / 100,
+    toplamTRY:         Math.round(toplamTRY * 100) / 100,
+    toplamFC,                                             // { 'USD': 500 } | {}
+    bekleyenCekTRY:    Math.round(bekleyenCekTRY * 100) / 100,
+    bekleyenCekFC,                                        // { 'USD': 100 } | {}
     bekleyenCekSayisi: bekleyenCekler.length,
     toplamKalemSayisi: acikKalemler.length,
   };
@@ -608,6 +621,138 @@ async function getStokSeriListesi({ cardCode, whsCode, top = 200, dbName }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Ürün bazlı satış tutarları — OINV + INV1 + OITM
+//
+// startDate / endDate verilmezse tüm zamanlar
+// cardCode verilirse yalnızca o müşteri
+// top: kaç ürün (default 10)
+// ─────────────────────────────────────────────────────────────
+async function getSatisByUrun({ startDate, endDate, cardCode, top = 10, dbName }) {
+  const params     = { Top: Number(top) };
+  const conditions = ["h.CANCELED = 'N'"];
+
+  if (startDate) { params.StartDate = startDate; conditions.push('h.DocDate >= @StartDate'); }
+  if (endDate)   { params.EndDate   = endDate;   conditions.push('h.DocDate <= @EndDate');   }
+  if (cardCode)  { params.CardCode  = cardCode;  conditions.push('h.CardCode = @CardCode');  }
+
+  return await execute(`
+    SELECT TOP (@Top)
+      l.ItemCode,
+      ISNULL(i.ItemName, l.Dscription)         AS UrunAdi,
+      ISNULL(i.U_BE1_MARKAKODU, '')            AS Marka,
+      ISNULL(g.ItmsGrpNam, '')                 AS Kategori,
+      SUM(l.Quantity)                          AS ToplamMiktar,
+      ISNULL(l.UomCode, l.unitMsr)             AS Birim,
+      SUM(l.LineTotal)                         AS ToplamSatis,
+      COUNT(DISTINCT h.DocEntry)               AS FaturaSayisi
+    FROM OINV h WITH(NOLOCK)
+    INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry  = l.DocEntry
+    LEFT  JOIN OITM i WITH(NOLOCK) ON l.ItemCode   = i.ItemCode
+    LEFT  JOIN OITB g WITH(NOLOCK) ON i.ItmsGrpCod = g.ItmsGrpCod
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY l.ItemCode, i.ItemName, l.Dscription, i.U_BE1_MARKAKODU, g.ItmsGrpNam, l.UomCode, l.unitMsr
+    ORDER BY ToplamSatis DESC
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Açık Satış Siparişleri — ORDR + RDR1 (ürün bazlı)
+//
+// cardCode  → müşteri kodu (opsiyonel)
+// itemCode  → ürün kodu (LIKE ile arar, opsiyonel)
+// top       → kaç kayıt (default 50)
+// ─────────────────────────────────────────────────────────────
+async function getAcikSiparisler({ cardCode, itemCode, docDate, top = 50, dbName }) {
+  const params     = { Top: Number(top) };
+  const conditions = ["h.DocStatus = 'O'", "h.CANCELED = 'N'", 'l.OpenQty > 0'];
+
+  if (cardCode) {
+    params.CardCode = cardCode;
+    conditions.push('h.CardCode = @CardCode');
+  }
+  if (itemCode) {
+    params.ItemCode = `%${itemCode}%`;
+    conditions.push('l.ItemCode LIKE @ItemCode');
+  }
+  if (docDate) {
+    params.DocDate = docDate;
+    conditions.push('CAST(h.DocDate AS DATE) = CAST(@DocDate AS DATE)');
+  }
+
+  return await execute(`
+    SELECT TOP (@Top)
+      h.DocNum,
+      h.CardCode,
+      h.CardName,
+      CONVERT(VARCHAR(10), h.DocDate,    23) AS DocDate,
+      CONVERT(VARCHAR(10), h.DocDueDate, 23) AS DocDueDate,
+      h.DocTotal,
+      ISNULL(h.DocCur, 'TRY')               AS DocCur,
+      l.LineNum,
+      l.ItemCode,
+      l.Dscription                           AS ItemName,
+      l.Quantity,
+      l.OpenQty,
+      ISNULL(l.UnitMsr, '')                  AS Birim,
+      l.Price,
+      l.LineTotal,
+      CONVERT(VARCHAR(10), l.ShipDate, 23)   AS ShipDate
+    FROM ORDR h WITH(NOLOCK)
+    INNER JOIN RDR1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY h.DocDate DESC, h.DocNum, l.LineNum
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// İrsaliye Satır Detayı — ODLN + DLN1 (ürün bazlı)
+//
+// cardCode  → müşteri kodu (opsiyonel)
+// itemCode  → ürün kodu LIKE (opsiyonel)
+// docDate   → irsaliye tarihi (YYYY-MM-DD, opsiyonel; verilmezse bugün)
+// top       → kaç kayıt (default 50)
+// ─────────────────────────────────────────────────────────────
+async function getIrsaliyeSatir({ cardCode, itemCode, docDate, top = 50, dbName }) {
+  const params     = { Top: Number(top) };
+  const conditions = ["h.CANCELED = 'N'"];
+
+  if (cardCode) {
+    params.CardCode = cardCode;
+    conditions.push('h.CardCode = @CardCode');
+  }
+  if (itemCode) {
+    params.ItemCode = `%${itemCode}%`;
+    conditions.push('l.ItemCode LIKE @ItemCode');
+  }
+  // Tarih belirtilmezse bugünü kullan
+  params.DocDate = docDate || new Date().toISOString().split('T')[0];
+  conditions.push('CAST(h.DocDate AS DATE) = CAST(@DocDate AS DATE)');
+
+  return await execute(`
+    SELECT TOP (@Top)
+      h.DocNum,
+      h.CardCode,
+      h.CardName,
+      CONVERT(VARCHAR(10), h.DocDate,    23) AS DocDate,
+      CONVERT(VARCHAR(10), h.DocDueDate, 23) AS DocDueDate,
+      h.DocTotal,
+      ISNULL(h.DocCur, 'TRY')               AS DocCur,
+      l.LineNum,
+      l.ItemCode,
+      l.Dscription                           AS ItemName,
+      l.Quantity,
+      ISNULL(l.UnitMsr, '')                  AS Birim,
+      l.Price,
+      l.LineTotal,
+      CONVERT(VARCHAR(10), l.ShipDate, 23)   AS ShipDate
+    FROM ODLN h WITH(NOLOCK)
+    INNER JOIN DLN1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY h.DocDate DESC, h.DocNum, l.LineNum
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Ham SQL sorgusu çalıştır (sadece SELECT — admin zamanlanmış görevler için)
 // ─────────────────────────────────────────────────────────────
 async function runRawQuery(queryText, dbName) {
@@ -618,4 +763,4 @@ async function runRawQuery(queryText, dbName) {
   return await execute(queryText, {}, dbName);
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, runRawQuery };
+module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };

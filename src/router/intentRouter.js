@@ -32,13 +32,16 @@ const {
   handleWizardFirmSelection, handleWizardDateSelection, handleWizardTimeSelection,
   getWizardState, confirmActivity, skipLocation,
   handleMediaAttachment, cancelAttachment,
+  cancelActivityWizard,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
+  cancelLeadWizard,
 } = require('../modules/crmActivity');
 
 const {
   handleCreateServiceCall, handleServiceWizardInput,
   handleServiceCustomerSelection, handleServicePriority,
   getServiceWizardState, confirmServiceCall,
+  cancelServiceWizard,
 } = require('../modules/serviceCallWizard');
 
 // Modüller lazy-load → döngüsel bağımlılık riski yok
@@ -119,7 +122,7 @@ async function handleIncoming({ from, text }) {
       return await sendText(from, t(lang, 'lang_changed'));
     }
     if (upper === 'SVC_SAVE')      return await confirmServiceCall(from);
-    if (upper === 'SVC_CANCEL')    return await sendText(from, '🚫 Servis çağrısı iptal edildi.');
+    if (upper === 'SVC_CANCEL')    { cancelServiceWizard(from); return await sendText(from, '🚫 Servis çağrısı iptal edildi.'); }
     if (upper === 'SVC_SERIAL:SKIP') {
       const ss = getServiceWizardState(from);
       if (ss) return await handleServiceWizardInput(from, '*');
@@ -147,8 +150,8 @@ async function handleIncoming({ from, text }) {
       return;
     }
     if (upper === 'LEAD_SAVE')     return await confirmLead(from);
-    if (upper === 'LEAD_CANCEL')   return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.');
-    if (upper === 'ACT_CANCEL')    return await sendText(from, '🚫 Aktivite iptal edildi.');
+    if (upper === 'LEAD_CANCEL')   { cancelLeadWizard(from); return await sendText(from, '🚫 Aday müşteri ekleme iptal edildi.'); }
+    if (upper === 'ACT_CANCEL')    { cancelActivityWizard(from); return await sendText(from, '🚫 Aktivite iptal edildi.'); }
     if (text.startsWith('ACT_FIRM:')) {
       const payload  = text.slice('ACT_FIRM:'.length);
       const sepIdx   = payload.indexOf('|');
@@ -173,6 +176,15 @@ async function handleIncoming({ from, text }) {
     }
 
     // ── 4. Wizard modu ───────────────────────────────────────
+    // Herhangi bir adımda "iptal / vazgeç / cancel" → wizard'ı temizle
+    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from);
+    if (_inWizard && /^(iptal|vazgeç|vazgec|cancel|çıkış|cikis|dur|kapat)$/i.test(upper)) {
+      cancelLeadWizard(from);
+      cancelActivityWizard(from);
+      cancelServiceWizard(from);
+      return await sendText(from, '🚫 İşlem iptal edildi.');
+    }
+
     if (getLeadWizardState(from))    return await handleLeadWizardInput(from, text);
     if (getWizardState(from))        return await handleWizardInput(from, text);
     if (getServiceWizardState(from)) return await handleServiceWizardInput(from, text);

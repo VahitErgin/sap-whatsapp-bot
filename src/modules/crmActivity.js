@@ -818,6 +818,17 @@ async function confirmLead(from) {
   }
 }
 
+function cancelActivityWizard(from) {
+  _wizard.delete(_norm(from));
+  _pendingActivity.delete(_norm(from));
+  _pendingAttachment.delete(_norm(from));
+}
+
+function cancelLeadWizard(from) {
+  _leadWizard.delete(_norm(from));
+  _pendingActivity.delete(_norm(from));
+}
+
 module.exports = {
   handleCreateActivity,
   handleWizardInput,
@@ -835,9 +846,11 @@ module.exports = {
   confirmActivity,
   getActivityTypes,
   getActivitySubjects,
+  cancelActivityWizard,
   // Lead wizard
   handleCreateLead,
   handleLeadWizardInput,
   getLeadWizardState,
   confirmLead,
+  cancelLeadWizard,
 };

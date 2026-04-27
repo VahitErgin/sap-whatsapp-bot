@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -120,6 +120,16 @@ Teknik servis / hizmet çağrısı sorguları:
   }
   → Kullanım: "servis çağrıları", "hizmet durumu", "teknik servis", "seri no ile sorgula", "açık servisler"
 
+Ürün bazlı satış tutarları — en çok satan ürünler (OINV + INV1):
+  endpoint: "SQL_SATIS_URUN"
+  params: { "startDate": null, "endDate": null, "cardCode": null, "top": "10" }
+  ÖNEMLİ: Kullanıcı tarih/dönem belirtmediyse startDate ve endDate MUTLAKA null bırak.
+  Sistem otomatik olarak kullanıcıya dönem seçim butonları gösterir.
+  Tarih belirtilmişse (ör: "kasım aralık", "bu ay", "2025") o tarihi kullan.
+  cardCode: müşteri kodu belirtilmişse doldur, yoksa null bırak.
+  → Kullanım: "en çok satan ürünler", "ürün bazlı satış", "hangi ürün çok sattı",
+              "satış sıralaması ürün", "en çok satılan", "ürün satış raporu"
+
 Ürün kategorisine göre satış tutarları:
   endpoint: "SQL_SATIS_KATEGORI"
   params: { "startDate": null, "endDate": null, "top": "5" }
@@ -164,6 +174,33 @@ Stokta olan ürünlerin fiyat listesi (OITM + OITW + ITM1):
   → Kullanım: "AMD fiyat listesi", "AMD ürünleri fiyatı", "stokta olan ürünler fiyatıyla",
               "fiyat listesi", "hangi ürünler var fiyatıyla", "stok fiyatları"
   KRİTİK: Items endpoint KULLANMA — fiyat için SAP SL Items'da Price alanı yoktur, $expand desteklenmez
+
+Açık satış siparişleri ürün/satır bazlı detay (ORDR + RDR1):
+  endpoint: "SQL_ACIK_SIPARIS"
+  params: {
+    "cardCode": "CARDCODE",      (opsiyonel - müşteri kodu biliniyorsa)
+    "cardName": "ABC Firma",     (opsiyonel - isimden ara, cardCode yerine kullan)
+    "itemCode": "ITEM001",       (opsiyonel - belirli ürün kodu filtresi)
+    "docDate":  "YYYY-MM-DD",    (opsiyonel - sipariş tarihi filtresi)
+    "top": "50"                  (opsiyonel - kaç satır, default 50)
+  }
+  → Kullanım: "ürün bazlı açık siparişlerim", "siparişte bekleyen ürünler",
+              "hangi ürünler siparişte", "açık sipariş detayı", "sipariş satırları"
+  KRİTİK: Orders endpoint + $expand KULLANMA — DocumentLines desteklenmez. Bu endpoint kullan.
+  YASAK: İrsaliye / teslimat / sevk sorgularında KULLANMA — o sorgular için SQL_IRSALIYE_SATIR kullan.
+
+İrsaliye satır detayı — sevk edilen / teslimata çıkan ürünler (ODLN + DLN1):
+  endpoint: "SQL_IRSALIYE_SATIR"
+  params: {
+    "cardCode": "CARDCODE",      (opsiyonel - müşteri kodu)
+    "cardName": "ABC Firma",     (opsiyonel - isimden ara)
+    "itemCode": "ITEM001",       (opsiyonel - ürün kodu filtresi)
+    "docDate":  "YYYY-MM-DD",    (opsiyonel - irsaliye tarihi; verilmezse BUGÜN kullan)
+    "top": "50"                  (opsiyonel - kaç satır, default 50)
+  }
+  → Kullanım: "bugün teslimata çıkan ürünler", "sevk edilen ürünler", "irsaliye detayı",
+              "hangi ürünler gönderildi", "bugün çıkan mallar", "sevkiyat satırları"
+  KRİTİK: DeliveryNotes OData endpoint veya SQL_ACIK_SIPARIS KULLANMA — bu endpoint kullan.
 
 PAZARLAMABELGESİ ENDPOİNTLERİ — Türkçe → SAP SL endpoint eşlemesi:
 
@@ -256,12 +293,7 @@ function _periodDates(period) {
   return { startDate: fmt(start), endDate: fmt(end) };
 }
 
-const _PERIOD_LABEL = {
-  weekly: 'Son 7 Gün', biweekly: 'Son 14 Gün', monthly: 'Son 30 Gün',
-  quarterly: 'Son 3 Ay', semiannual: 'Son 6 Ay', annual: 'Son 1 Yıl',
-};
-
-const _PERIOD_ENDPOINTS = new Set(['SQL_SATIS_TEMSILCI', 'SQL_SATIS_KATEGORI', 'SQL_SATIS_MARKA']);
+const _PERIOD_ENDPOINTS = new Set(['SQL_SATIS_TEMSILCI', 'SQL_SATIS_KATEGORI', 'SQL_SATIS_MARKA', 'SQL_SATIS_URUN']);
 
 // ─── Sorgu sonuç cache'i (2 dk TTL) ──────────────────────────
 // Aynı kullanıcının aynı sorusunu tekrar Claude+SAP'a göndermez.
@@ -366,7 +398,7 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     if (customerCardCode && Array.isArray(plan.queries)) {
       plan.queries.forEach(q => {
         q.params = q.params || {};
-        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE', 'SQL_STOK_SERI'].includes(q.endpoint)) {
+        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE', 'SQL_STOK_SERI', 'SQL_ACIK_SIPARIS', 'SQL_IRSALIYE_SATIR'].includes(q.endpoint)) {
           q.params.cardCode = customerCardCode;
           delete q.params.cardName;
         } else if (q.method !== 'POST' && q.method !== 'PATCH') {
@@ -685,6 +717,15 @@ async function executeQueries(sl, queries, dbName) {
           dbName,
         });
         data = rows;
+      } else if (q.endpoint === 'SQL_SATIS_URUN') {
+        const rows = await getSatisByUrun({
+          startDate: q.params.startDate || null,
+          endDate:   q.params.endDate   || null,
+          cardCode:  q.params.cardCode  || null,
+          top:       parseInt(q.params.top) || 10,
+          dbName,
+        });
+        data = rows;
       } else if (q.endpoint === 'SQL_SATIS_KATEGORI') {
         const rows = await getSatisByKategori({
           startDate: q.params.startDate,
@@ -741,6 +782,26 @@ async function executeQueries(sl, queries, dbName) {
           callId:       q.params.callId       || null,
           statusFilter: q.params.statusFilter || null,
           top:          parseInt(q.params.top) || 20,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_ACIK_SIPARIS') {
+        // Direkt SQL: ORDR + RDR1 (ürün satır bazlı)
+        const rows = await getAcikSiparisler({
+          cardCode: q.params.cardCode || null,
+          itemCode: q.params.itemCode || null,
+          docDate:  q.params.docDate  || null,
+          top:      parseInt(q.params.top) || 50,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_IRSALIYE_SATIR') {
+        // Direkt SQL: ODLN + DLN1 (irsaliye satır bazlı)
+        const rows = await getIrsaliyeSatir({
+          cardCode: q.params.cardCode || null,
+          itemCode: q.params.itemCode || null,
+          docDate:  q.params.docDate  || null,
+          top:      parseInt(q.params.top) || 50,
           dbName,
         });
         data = rows;
@@ -815,18 +876,28 @@ function formatResultsLocal(_question, queries, results) {
     if (ep === 'SQL_CARI_EKSTRE') {
       const eks = data[0] || {};
       sec.push(`💼 *${r.description || 'Cari Hesap Durumu'}*\n`);
-      if (!eks.acikKalemler?.length && !eks.toplamTRY) {
+      const fcEntries = Object.entries(eks.toplamFC || {}).filter(([, v]) => v > 0.01);
+      if (!eks.acikKalemler?.length && !eks.toplamTRY && !fcEntries.length) {
         sec.push('✅ Açık bakiye yok.');
       } else {
         if (eks.toplamTRY > 0) sec.push(`🔴 *Borç (TRY): ${fmtMoney(eks.toplamTRY)}*`);
-        if (eks.toplamFC  > 0) sec.push(`🔴 *Borç (Döviz): ${fmtMoney(eks.toplamFC, eks.acikKalemler[0]?.ParaBirimi)}*`);
-        if (eks.bekleyenCekSayisi > 0) sec.push(`🗓 Bekleyen çek: ${eks.bekleyenCekSayisi} adet (${fmtMoney(eks.bekleyenCekTRY)})`);
+        fcEntries.forEach(([cur, amt]) => sec.push(`🔴 *Borç (${cur}): ${fmtMoney(amt, cur)}*`));
+        if (eks.bekleyenCekSayisi > 0) {
+          const cekTRY = eks.bekleyenCekTRY > 0 ? fmtMoney(eks.bekleyenCekTRY) : '';
+          const cekFC  = Object.entries(eks.bekleyenCekFC || {})
+            .filter(([, v]) => v > 0.01).map(([c, a]) => fmtMoney(a, c)).join(' + ');
+          const cekAmt = [cekTRY, cekFC].filter(Boolean).join(' + ');
+          sec.push(`🗓 Bekleyen çek: ${eks.bekleyenCekSayisi} adet (${cekAmt})`);
+        }
         const items = eks.acikKalemler || [];
         if (items.length) {
           sec.push('\n*Açık Kalemler:*');
           items.slice(0, 8).forEach(k => {
-            const gec  = k.GecikmeGun > 0 ? ` ⚠️ ${k.GecikmeGun}g geç` : '';
-            const acik = k.KalanTRY > 0 ? fmtMoney(k.KalanTRY) : fmtMoney(k.KalanFC, k.ParaBirimi);
+            const gec   = k.GecikmeGun > 0 ? ` ⚠️ ${k.GecikmeGun}g geç` : '';
+            const tryPart = k.KalanTRY > 0.01 ? fmtMoney(k.KalanTRY) : '';
+            const fcPart  = k.KalanFC  > 0.01 && k.ParaBirimi && k.ParaBirimi !== 'TRY'
+              ? fmtMoney(k.KalanFC, k.ParaBirimi) : '';
+            const acik = [tryPart, fcPart].filter(Boolean).join(' | ') || fmtMoney(0);
             sec.push(`• ${fmtDate(k.VadeTarihi)} — ${String(k.Aciklama || '').substring(0, 28)} — *${acik}*${gec}`);
           });
           if (items.length > 8) sec.push(`_... ve ${items.length - 8} kalem daha_`);
@@ -835,14 +906,36 @@ function formatResultsLocal(_question, queries, results) {
 
     } else if (ep === 'SQL_VADESI_GECENLER') {
       sec.push(`📋 *${r.description}* (${r.count} cari)\n`);
-      let total = 0;
+      let totalTRY = 0;
+      const totalFC = {};
       data.slice(0, 10).forEach(row => {
-        const bal = parseFloat(row.BakiyeTRY || 0);
-        total += bal;
-        sec.push(`• *${row.CardName}*: ${fmtMoney(bal)}${row.EnEskiVade ? ` · en eski: ${fmtDate(row.EnEskiVade)}` : ''}`);
+        const balTRY = parseFloat(row.BakiyeTRY || 0);
+        const balFC  = parseFloat(row.BakiyeFC  || 0);
+        const cur    = row.Currency;
+        totalTRY += balTRY;
+        if (balFC > 0.01 && cur && cur !== 'TRY') {
+          totalFC[cur] = (totalFC[cur] || 0) + balFC;
+        }
+        let line = `• *${row.CardName}*: ${fmtMoney(balTRY)}`;
+        if (balFC > 0.01 && cur && cur !== 'TRY') line += ` | ${fmtMoney(balFC, cur)}`;
+        if (row.EnEskiVade) line += ` · en eski: ${fmtDate(row.EnEskiVade)}`;
+        sec.push(line);
       });
       if (data.length > 10) sec.push(`_... ve ${data.length - 10} cari daha_`);
-      sec.push(`\n💰 *Toplam Açık: ${fmtMoney(total)}*`);
+      const fcSummary = Object.entries(totalFC).map(([c, a]) => fmtMoney(a, c)).join(' + ');
+      sec.push(`\n💰 *Toplam Açık: ${fmtMoney(totalTRY)}${fcSummary ? ' + ' + fcSummary : ''}*`);
+
+    } else if (ep === 'SQL_SATIS_URUN') {
+      sec.push(`📦 *${r.description}* (${r.count} ürün)\n`);
+      let total = 0;
+      data.forEach((row, i) => {
+        const amt  = parseFloat(row.ToplamSatis || 0);
+        total += amt;
+        const marka = row.Marka ? ` [${row.Marka}]` : '';
+        const miktar = parseFloat(row.ToplamMiktar || 0).toLocaleString('tr-TR');
+        sec.push(`${i + 1}. *${row.ItemCode}*${marka} — ${String(row.UrunAdi).substring(0, 45)}\n   ${fmtMoney(amt)} · ${miktar} ${row.Birim || ''} · ${row.FaturaSayisi} fatura`);
+      });
+      sec.push(`\n💰 *Toplam: ${fmtMoney(total)}*`);
 
     } else if (ep === 'SQL_SATIS_KATEGORI') {
       sec.push(`📊 *${r.description}* (${r.count} kategori)\n`);
@@ -935,6 +1028,65 @@ function formatResultsLocal(_question, queries, results) {
           );
         });
         if (data.length > 8) sec.push(`_... ve ${data.length - 8} çağrı daha_`);
+      }
+
+    } else if (ep === 'SQL_IRSALIYE_SATIR') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nBugün sevk edilen ürün bulunamadı.`);
+      } else {
+        const byOrder = {};
+        data.forEach(row => {
+          const key = row.DocNum;
+          if (!byOrder[key]) {
+            byOrder[key] = {
+              DocNum: row.DocNum, CardName: row.CardName, DocDate: row.DocDate,
+              DocCur: row.DocCur, lines: [],
+            };
+          }
+          byOrder[key].lines.push(row);
+        });
+        const orders = Object.values(byOrder);
+        sec.push(`🚚 *${r.description}* (${orders.length} irsaliye, ${data.length} satır)\n`);
+        orders.slice(0, 8).forEach(o => {
+          sec.push(`📋 *İrsaliye #${o.DocNum}* — *${o.CardName}*  📅 ${fmtDate(o.DocDate)}`);
+          o.lines.slice(0, 5).forEach(l => {
+            const qty = `${parseFloat(l.Quantity).toLocaleString('tr-TR')} ${l.Birim}`;
+            sec.push(`   • *${l.ItemCode}* ${String(l.ItemName).substring(0, 40)}\n     Miktar: ${qty}  ·  ${fmtMoney(l.LineTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+          });
+          if (o.lines.length > 5) sec.push(`   _... +${o.lines.length - 5} satır_`);
+        });
+        if (orders.length > 8) sec.push(`_... ve ${orders.length - 8} irsaliye daha_`);
+      }
+
+    } else if (ep === 'SQL_ACIK_SIPARIS') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nAçık sipariş satırı bulunamadı.`);
+      } else {
+        // Sipariş başlığına göre grupla
+        const byOrder = {};
+        data.forEach(row => {
+          const key = row.DocNum;
+          if (!byOrder[key]) {
+            byOrder[key] = {
+              DocNum: row.DocNum, CardName: row.CardName, DocDate: row.DocDate,
+              DocDueDate: row.DocDueDate, DocTotal: row.DocTotal, DocCur: row.DocCur,
+              lines: [],
+            };
+          }
+          byOrder[key].lines.push(row);
+        });
+        const orders = Object.values(byOrder);
+        sec.push(`📦 *${r.description}* (${orders.length} sipariş, ${data.length} satır)\n`);
+        orders.slice(0, 8).forEach(o => {
+          sec.push(`📋 *Sipariş #${o.DocNum}* — *${o.CardName}*`);
+          sec.push(`   📅 ${fmtDate(o.DocDate)}  Termin: ${fmtDate(o.DocDueDate)}`);
+          o.lines.slice(0, 5).forEach(l => {
+            const qty = `${parseFloat(l.OpenQty).toLocaleString('tr-TR')} / ${parseFloat(l.Quantity).toLocaleString('tr-TR')} ${l.Birim}`;
+            sec.push(`   • *${l.ItemCode}* ${String(l.ItemName).substring(0, 40)}\n     Açık: ${qty}  ·  ${fmtMoney(l.LineTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+          });
+          if (o.lines.length > 5) sec.push(`   _... +${o.lines.length - 5} satır_`);
+        });
+        if (orders.length > 8) sec.push(`_... ve ${orders.length - 8} sipariş daha_`);
       }
 
     } else {
