@@ -23,7 +23,7 @@ const { writeLog }   = require('../services/logService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { isAllowed, isEnabled }         = require('../services/userRegistry');
 const { loginUser }  = require('../modules/sapAuth');
-const { t, langInstruction } = require('../services/i18n');
+const { t } = require('../services/i18n');
 const { getLang, setLang }   = require('../services/langService');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
 const {
@@ -31,7 +31,7 @@ const {
   handleWizardTypeSelection, handleWizardCategorySelection, handleWizardSubjectSelection,
   handleWizardFirmSelection, handleWizardDateSelection, handleWizardTimeSelection,
   getWizardState, confirmActivity, skipLocation,
-  handleMediaAttachment, cancelAttachment,
+  cancelAttachment,
   cancelActivityWizard,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
   cancelLeadWizard,
@@ -325,9 +325,11 @@ function _keywordIntent(text) {
 
   // CRM: açık oluşturma fiilleri veya 1. şahıs geçmiş zaman
   if (
-    /aktivite\s+(oluştur|ekle|yaz|kaydet)/.test(t) ||
-    /toplantı\s+(yaptık|ekle|oluştur|kaydı)/.test(t) ||
-    /telefon görüşmesi (ekle|yaptım|kaydı|oluştur)/.test(t) ||
+    /aktivite\s+(oluştur|ekle|yaz|kaydet|gir|aç|başlat)/.test(t) ||
+    /(oluştur|ekle|yaz|kaydet|gir|aç)\s+aktivite/.test(t) ||
+    /aktivite\s+gir/.test(t) ||
+    /toplantı\s+(yaptık|ekle|oluştur|kaydı|gir)/.test(t) ||
+    /telefon görüşmesi (ekle|yaptım|kaydı|oluştur|gir)/.test(t) ||
     /(not|görev) ekle/.test(t) ||
     /(aradım|ziyaret ettim|görüştük|konuştuk|toplantı yaptık)/.test(t)
   )

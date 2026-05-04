@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -103,6 +103,28 @@ Tek cari bakiye / ekstre / yürüyen bakiye:
      veya: { "cardName": "ABC", "currency": "USD", "refDate": "YYYY-MM-DD" }  ← isim + döviz
   → Kullanım: "... bakiyesi", "... hesap durumu", "... borcu ne kadar", "... alacağı"
 
+Banka hesabı kapanış bakiyeleri (OBNK + JDT1):
+  endpoint: "SQL_BANKA_BAKIYE"
+  params: { "refDate": "YYYY-MM-DD" }
+  refDate: bakiye tarihi — belirtilmezse bugün, yıl sonu için "2025-12-31" kullan
+  → Kullanım: "banka bakiyesi", "banka kapanış bakiyesi", "banka hesapları", "kasa/banka durumu",
+              "yıl sonu banka", "hesap bakiyeleri"
+  KRİTİK: ChartOfAccounts, FinancialStatements, BankPages gibi Service Layer endpoint KULLANMA.
+
+Tahsilat listesi — gelen ödemeler (ORCT):
+  endpoint: "SQL_TAHSILAT"
+  params: {
+    "cardCode":  "CARDCODE",   (opsiyonel - müşteri kodu)
+    "cardName":  "ABC Firma",  (opsiyonel - isimden ara)
+    "startDate": "YYYY-MM-DD", (opsiyonel)
+    "endDate":   "YYYY-MM-DD", (opsiyonel)
+    "top": "20"                (opsiyonel)
+  }
+  → Kullanım: "tahsilatlar", "gelen ödemeler", "tahsilat listesi", "ödeme aldık mı",
+              "müşteri ödedi mi", "nakit/çek/transfer tahsilatları"
+  KRİTİK: IncomingPayments OData endpoint KULLANMA — DocTotal/PaymentType alanları yok,
+          bu sorgular için SADECE SQL_TAHSILAT kullan.
+
 Tüm carilerin bakiye özeti:
   endpoint: "SQL_VADESI_GECENLER"
   params: { "refDate": "YYYY-MM-DD", "cardType": "C" }
@@ -122,7 +144,8 @@ Teknik servis / hizmet çağrısı sorguları:
 
 Ürün bazlı satış tutarları — en çok satan ürünler (OINV + INV1):
   endpoint: "SQL_SATIS_URUN"
-  params: { "startDate": null, "endDate": null, "cardCode": null, "top": "10" }
+  params: { "startDate": null, "endDate": null, "cardCode": null, "top": "20" }
+  top: maksimum 20 kullan — daha fazlası WhatsApp limitini aşar.
   ÖNEMLİ: Kullanıcı tarih/dönem belirtmediyse startDate ve endDate MUTLAKA null bırak.
   Sistem otomatik olarak kullanıcıya dönem seçim butonları gösterir.
   Tarih belirtilmişse (ör: "kasım aralık", "bu ay", "2025") o tarihi kullan.
@@ -478,7 +501,10 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     }
 
     // 5. Sonuçları formatla
-    const formatted = formatResultsLocal(question, plan.queries, results);
+    let formatted = formatResultsLocal(question, plan.queries, results);
+    if (formatted.length > 3800) {
+      formatted = formatted.substring(0, 3750) + '\n\n_... (sonuçlar kısaltıldı — daha az kayıt isteyin)_';
+    }
     if (!_skipFallback) _cacheSet(from, question, formatted);
     await sendText(from, formatted);
 
@@ -702,7 +728,22 @@ async function executeQueries(sl, queries, dbName) {
 
       let data;
 
-      if (q.endpoint === 'SQL_CARI_EKSTRE') {
+      if (q.endpoint === 'SQL_BANKA_BAKIYE') {
+        const rows = await getBankaBakiye({
+          refDate: q.params.refDate || null,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_TAHSILAT') {
+        const rows = await getTahsilatlar({
+          cardCode:  q.params.cardCode  || null,
+          startDate: q.params.startDate || null,
+          endDate:   q.params.endDate   || null,
+          top:       parseInt(q.params.top) || 20,
+          dbName,
+        });
+        data = rows;
+      } else if (q.endpoint === 'SQL_CARI_EKSTRE') {
         // Direkt SQL: JDT1 + OJDT + OCHH (waterfall bakiye)
         const rows = await getCariEkstre({
           cardCode: q.params.cardCode,
@@ -873,7 +914,68 @@ function formatResultsLocal(_question, queries, results) {
     const data = r.data || [];
     const sec  = [];
 
-    if (ep === 'SQL_CARI_EKSTRE') {
+    if (ep === 'SQL_BANKA_BAKIYE') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nBanka hesabı bulunamadı.`);
+      } else {
+        sec.push(`🏦 *${r.description}* (${r.count} hesap)\n`);
+        let toplamTRY = 0;
+        // Satırları account bazında grupla (bir account → birden fazla Para olabilir)
+        const byAcct = {};
+        data.forEach(row => {
+          const key = row.AcctCode;
+          if (!byAcct[key]) byAcct[key] = { AcctCode: key, HesapAdi: row.HesapAdi, toplamTRY: 0, fc: {} };
+          byAcct[key].toplamTRY += parseFloat(row.BakiyeTRY || 0);
+          if (row.Para && row.Para !== 'TRY') {
+            const fcAmt = parseFloat(row.BakiyeFC || 0);
+            if (Math.abs(fcAmt) > 0.01)
+              byAcct[key].fc[row.Para] = (byAcct[key].fc[row.Para] || 0) + fcAmt;
+          }
+        });
+
+        const hesaplar = Object.values(byAcct);
+        const genelToplamFC = {};
+        hesaplar.forEach(h => {
+          toplamTRY += h.toplamTRY;
+          Object.entries(h.fc).forEach(([cur, amt]) => {
+            genelToplamFC[cur] = (genelToplamFC[cur] || 0) + amt;
+          });
+          const fcParts = Object.entries(h.fc).map(([c, a]) => fmtMoney(a, c)).join(' | ');
+          let line = `• *${h.HesapAdi}* (${h.AcctCode})\n  TRY: ${fmtMoney(h.toplamTRY)}`;
+          if (fcParts) line += `  |  ${fcParts}`;
+          sec.push(line);
+        });
+
+        const fcToplamParts = Object.entries(genelToplamFC).map(([c, a]) => fmtMoney(a, c)).join(' | ');
+        sec.push(`\n💰 *Toplam TRY: ${fmtMoney(toplamTRY)}*${fcToplamParts ? `\n💰 *Toplam FC: ${fcToplamParts}*` : ''}`);
+      }
+
+    } else if (ep === 'SQL_TAHSILAT') {
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nTahsilat kaydı bulunamadı.`);
+      } else {
+        sec.push(`💳 *${r.description}* (${r.count} tahsilat)\n`);
+        let toplam = 0;
+        data.slice(0, 15).forEach(row => {
+          const tutar = parseFloat(row.Toplam || 0);
+          toplam += tutar;
+          const turler = [];
+          if (parseFloat(row.Nakit    || 0) > 0.01) turler.push(`Nakit: ${fmtMoney(row.Nakit,    row.DocCur !== 'TRY' ? row.DocCur : null)}`);
+          if (parseFloat(row.Cek      || 0) > 0.01) turler.push(`Çek: ${fmtMoney(row.Cek,        row.DocCur !== 'TRY' ? row.DocCur : null)}`);
+          if (parseFloat(row.Transfer || 0) > 0.01) turler.push(`EFT: ${fmtMoney(row.Transfer,   row.DocCur !== 'TRY' ? row.DocCur : null)}`);
+          if (parseFloat(row.KrediKarti||0) > 0.01) turler.push(`KK: ${fmtMoney(row.KrediKarti,  row.DocCur !== 'TRY' ? row.DocCur : null)}`);
+          sec.push(
+            `• #${row.DocNum} *${row.CardName}* — ${fmtDate(row.DocDate)}\n` +
+            `  *${fmtMoney(tutar, row.DocCur !== 'TRY' ? row.DocCur : null)}*` +
+            (turler.length ? `  (${turler.join(' · ')})` : '') +
+            (row.Aciklama ? `\n  _${String(row.Aciklama).substring(0, 50)}_` : '')
+          );
+        });
+        if (data.length > 15) sec.push(`_... ve ${data.length - 15} kayıt daha_`);
+        sec.push(`\n💰 *Toplam Tahsilat: ${fmtMoney(toplam)}*`);
+      }
+
+    } else if (ep === 'SQL_CARI_EKSTRE') {
       const eks = data[0] || {};
       sec.push(`💼 *${r.description || 'Cari Hesap Durumu'}*\n`);
       const fcEntries = Object.entries(eks.toplamFC || {}).filter(([, v]) => v > 0.01);

@@ -262,7 +262,30 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateF
       status          AS StatusKod,
       Telephone       AS Telefon,
       Aciklama        AS Aciklama
-    FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
+    FROM (
+      SELECT
+        T1.customer,
+        T0.srvcCallID,
+        T1.internalSN,
+        T0.itemName,
+        NULL          AS GelenBelge,
+        NULL          AS BelgeTarih,
+        NULL          AS KargoNo,
+        NULL          AS AdresSube,
+        T1.createDate,
+        T4.Descriptio AS Cozum,
+        T3.Subject    AS Durum,
+        NULL          AS TeslimBelgeNo,
+        NULL          AS TeslimTarihi,
+        NULL          AS TeslimKargo,
+        T1.status,
+        T1.Telephone,
+        NULL          AS Aciklama
+      FROM SCL1 T0 WITH(NOLOCK)
+      INNER JOIN OSCL T1 WITH(NOLOCK) ON T0.srvcCallID = T1.callID
+      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID  = T3.SltCode
+      LEFT JOIN OSST T4 WITH(NOLOCK) ON T3.StatusNum   = T4.Number
+    ) v
     ${where}
     ORDER BY createDate DESC
   `, params, dbName);
@@ -333,7 +356,20 @@ async function getServisGuncellemeleri({ dbName } = {}) {
       Durum       AS Durum,
       Telephone   AS Telefon,
       createDate  AS AcilisTarihi
-    FROM BE1_B2BLASTHIZMETSTATUS WITH(NOLOCK)
+    FROM (
+      SELECT
+        T1.customer,
+        T0.srvcCallID,
+        T1.internalSN,
+        T0.itemName,
+        T1.createDate,
+        T3.Subject AS Durum,
+        T1.status,
+        T1.Telephone
+      FROM SCL1 T0 WITH(NOLOCK)
+      INNER JOIN OSCL T1 WITH(NOLOCK) ON T0.srvcCallID = T1.callID
+      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID  = T3.SltCode
+    ) v
     ORDER BY createDate DESC
   `, {}, dbName);
 }
@@ -613,11 +649,108 @@ async function getStokSeriListesi({ cardCode, whsCode, top = 200, dbName }) {
       DocLine,
       WhsCode,
       SysNumber
-    FROM BE1_STOKSERILISTE_ALL WITH(NOLOCK)
+    FROM (
+      SELECT
+        LEFT(ISNULL(MAX(T0.CardCode),(
+          SELECT TOP 1 T0.CardCode FROM OITL T0 WITH(NOLOCK)
+          INNER JOIN ITL1 T1 WITH(NOLOCK) ON T0.LogEntry=T1.LogEntry
+          INNER JOIN OSRN T2 WITH(NOLOCK) ON T1.ItemCode=T2.ItemCode AND T1.SysNumber=T2.SysNumber
+          WHERE T2.ItemCode=T0.ItemCode AND T2.DistNumber=T3.DistNumber AND StockQty<0
+          ORDER BY T0.LogEntry DESC
+        )),7) AS CardCode,
+        MAX(T4.CardName)     AS CardName,
+        T0.ItemCode,
+        MAX(T0.ItemName)     AS ItemName,
+        T3.DistNumber,
+        MAX(T0.DocType)      AS DocType,
+        MAX(T0.DocEntry)     AS DocEntry,
+        MAX(T0.DocLine)      AS DocLine,
+        T0.LocCode           AS WhsCode,
+        T2.SysNumber
+      FROM OITL T0 WITH(NOLOCK)
+      INNER JOIN ITL1 T1 WITH(NOLOCK) ON T0.LogEntry=T1.LogEntry
+      INNER JOIN OSRQ T2 WITH(NOLOCK) ON T1.ItemCode=T2.ItemCode AND T1.SysNumber=T2.SysNumber AND T0.LocCode=T2.WhsCode
+      INNER JOIN OSRN T3  WITH(NOLOCK) ON T2.ItemCode=T3.ItemCode AND T2.SysNumber=T3.SysNumber
+      LEFT OUTER JOIN OCRD T4 WITH(NOLOCK) ON LEFT(T0.CardCode,7)=LEFT(T4.CardCode,7)
+      WHERE T2.Quantity > 0
+      GROUP BY T0.ItemCode, T3.DistNumber, T0.LocCode, T2.SysNumber, T0.CardCode
+    ) v
     WHERE CardCode = @CardCode
       AND WhsCode  = @WhsCode
     ORDER BY ItemCode, DistNumber
   `, { CardCode: cardCode, WhsCode: whsCode, Top: Number(top) }, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Banka hesabı bakiyeleri — OBNK + JDT1 (kapanış bakiyesi)
+//
+// refDate → bakiye tarihi (YYYY-MM-DD; verilmezse bugün)
+// ─────────────────────────────────────────────────────────────
+async function getBankaBakiye({ refDate, dbName }) {
+  const params = { RefDate: refDate || new Date().toISOString().split('T')[0] };
+  // Banka/kasa hesapları: ORCT ve OVPM'de kullanılan ödeme G/L hesapları
+  // (TrsfrAcct = EFT/havale, CashAcct = nakit, CheckAcct = çek)
+  return await execute(`
+    SELECT
+      oa.AcctCode,
+      oa.AcctName                                             AS HesapAdi,
+      ISNULL(j.FCCurrency, 'TRY')                            AS Para,
+      SUM(ISNULL(j.Debit,   0)) - SUM(ISNULL(j.Credit,  0)) AS BakiyeTRY,
+      SUM(ISNULL(j.FCDebit, 0)) - SUM(ISNULL(j.FCCredit,0)) AS BakiyeFC
+    FROM OACT oa WITH(NOLOCK)
+    INNER JOIN JDT1 j  WITH(NOLOCK) ON j.Account  = oa.AcctCode
+    INNER JOIN OJDT jh WITH(NOLOCK) ON jh.TransId = j.TransId
+    WHERE oa.AcctCode IN (
+      SELECT DISTINCT TrsfrAcct FROM ORCT WITH(NOLOCK) WHERE TrsfrAcct IS NOT NULL AND TrsfrAcct <> ''
+      UNION
+      SELECT DISTINCT CashAcct  FROM ORCT WITH(NOLOCK) WHERE CashAcct  IS NOT NULL AND CashAcct  <> ''
+      UNION
+      SELECT DISTINCT CheckAcct FROM ORCT WITH(NOLOCK) WHERE CheckAcct IS NOT NULL AND CheckAcct <> ''
+      UNION
+      SELECT DISTINCT TrsfrAcct FROM OVPM WITH(NOLOCK) WHERE TrsfrAcct IS NOT NULL AND TrsfrAcct <> ''
+      UNION
+      SELECT DISTINCT CashAcct  FROM OVPM WITH(NOLOCK) WHERE CashAcct  IS NOT NULL AND CashAcct  <> ''
+      UNION
+      SELECT DISTINCT CheckAcct FROM OVPM WITH(NOLOCK) WHERE CheckAcct IS NOT NULL AND CheckAcct <> ''
+    )
+    AND jh.RefDate <= @RefDate
+    GROUP BY oa.AcctCode, oa.AcctName, j.FCCurrency
+    ORDER BY oa.AcctCode, Para
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tahsilat listesi — ORCT (gelen ödemeler)
+//
+// cardCode  → müşteri kodu (opsiyonel)
+// startDate / endDate → tarih filtresi (opsiyonel)
+// top       → kaç kayıt (default 20)
+// ─────────────────────────────────────────────────────────────
+async function getTahsilatlar({ cardCode, startDate, endDate, top = 20, dbName }) {
+  const params     = { Top: Number(top) };
+  const conditions = ["h.Canceled = 'N'"];
+
+  if (cardCode)  { params.CardCode  = cardCode;  conditions.push('h.CardCode = @CardCode'); }
+  if (startDate) { params.StartDate = startDate; conditions.push('h.DocDate >= @StartDate'); }
+  if (endDate)   { params.EndDate   = endDate;   conditions.push('h.DocDate <= @EndDate'); }
+
+  return await execute(`
+    SELECT TOP (@Top)
+      h.DocNum,
+      h.CardCode,
+      h.CardName,
+      CONVERT(VARCHAR(10), h.DocDate, 23)    AS DocDate,
+      ISNULL(h.CashSum,   0)                 AS Nakit,
+      ISNULL(h.CheckSum,  0)                 AS Cek,
+      ISNULL(h.TrsfrSum,  0)                 AS Transfer,
+      ISNULL(h.CreditSum, 0)                 AS KrediKarti,
+      ISNULL(h.DocTotal,  0)                 AS Toplam,
+      ISNULL(h.DocCurr, 'TRY')              AS DocCur,
+      ISNULL(h.Comments, '')                 AS Aciklama
+    FROM ORCT h WITH(NOLOCK)
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY h.DocDate DESC, h.DocNum DESC
+  `, params, dbName);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -763,4 +896,4 @@ async function runRawQuery(queryText, dbName) {
   return await execute(queryText, {}, dbName);
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };
