@@ -211,8 +211,10 @@ function writeEnv(cfg) {
     `SAP_USERNAME=${cfg.SAP_USERNAME}`,
     `SAP_PASSWORD=${cfg.SAP_PASSWORD}`,
     '',
-    '# ─── SAP B1 Direkt SQL (MSSQL) ───────────────────────────────',
+    '# ─── SAP B1 Direkt SQL (MSSQL / HANA) ──────────────────────',
+    `SAP_DB_TYPE=${cfg.SAP_DB_TYPE || 'mssql'}`,
     `SAP_DB_SERVER=${cfg.SAP_DB_SERVER}`,
+    `SAP_DB_PORT=${cfg.SAP_DB_PORT || '1433'}`,
     `SAP_DB_NAME=${cfg.SAP_DB_NAME}`,
     `SAP_DB_USER=${cfg.SAP_DB_USER}`,
     `SAP_DB_PASSWORD=${cfg.SAP_DB_PASSWORD}`,
@@ -316,7 +318,9 @@ async function main() {
   INFO('Bu adımı atlamak için Sunucu alanını boş bırakın.');
   console.log();
 
+  cfg.SAP_DB_TYPE     = await ask('Veritabanı tipi (mssql / hana)', 'mssql');
   cfg.SAP_DB_SERVER   = await ask('SQL Server (IP veya hostname)', '');
+  cfg.SAP_DB_PORT     = await ask('Port', cfg.SAP_DB_TYPE === 'hana' ? '30015' : '1433');
   cfg.SAP_DB_NAME     = await ask('Veritabanı adı', cfg.SAP_COMPANY_DB);
   cfg.SAP_DB_USER     = await ask('SQL kullanıcısı', 'sa');
   cfg.SAP_DB_PASSWORD = await askSecret('SQL şifresi');
@@ -487,6 +491,7 @@ async function main() {
       WARN('Graph bağlantısı doğrulanamadı — bilgiler kaydedilecek, panelden aktif edebilirsiniz.');
       cfg.GRAPH_ENABLED = 'false';
     }
+    writeEnv(cfg);
   } else {
     INFO('Outlook entegrasyonu devre dışı bırakıldı.');
   }
