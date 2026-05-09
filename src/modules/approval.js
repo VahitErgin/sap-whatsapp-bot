@@ -19,9 +19,8 @@ const https  = require('https');
 const config = require('../config/config');
 
 const { sendText, sendButtons, sendList } = require('../services/whatsappService');
-const { readApprovers }                   = require('../admin/approverService');
-const { getOnayBekleyenler }              = require('./sapDb');
-const { getSession }                      = require('./sessionManager');
+const { getOnayBekleyenler, getOnayYetkilileri } = require('./sapDb');
+const { getSession }                             = require('./sessionManager');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -86,7 +85,7 @@ async function showOrderDetail({ from, wddCode }) {
       order.Aciklama ? `📝 *Açıklama:* ${_truncate(order.Aciklama, 80)}` : '',
     ].filter(Boolean).join('\n');
 
-    if (isApprover(from)) {
+    if (await isApprover(from)) {
       await sendButtons(
         from,
         `Belge #${order.DocNum}`,
@@ -110,7 +109,7 @@ async function showOrderDetail({ from, wddCode }) {
 // 4. Onayla veya Reddet — SAP Service Layer
 // ─────────────────────────────────────────────────────────────
 async function confirmApproval({ from, docEntry, action }) {
-  if (!isApprover(from)) {
+  if (!await isApprover(from)) {
     return sendText(from, '🚫 Onay/red yetkisine sahip değilsiniz.');
   }
 
@@ -182,8 +181,14 @@ async function confirmApproval({ from, docEntry, action }) {
 // Yardımcı fonksiyonlar
 // ─────────────────────────────────────────────────────────────
 
-function isApprover(phoneNumber) {
-  return readApprovers().some(a => a.phone === phoneNumber);
+async function isApprover(phoneNumber) {
+  const phone10 = String(phoneNumber || '').replace(/\D/g, '').slice(-10);
+  try {
+    const list = await getOnayYetkilileri();
+    return list.some(u => u.Telefon.slice(-10) === phone10);
+  } catch {
+    return false;
+  }
 }
 
 function _formatMoney(amount) {

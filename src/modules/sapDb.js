@@ -367,6 +367,24 @@ async function getServisGuncellemeleri({ dbName } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Onay Yetkilileri — WST1 + OUSR
+//
+// SAP'ta tanımlı onay şablonlarındaki tüm kullanıcıları döndürür.
+// ─────────────────────────────────────────────────────────────
+async function getOnayYetkilileri({ dbName } = {}) {
+  return await execute(`
+    SELECT DISTINCT
+      u.USERID  AS UserKod,
+      u.U_Name  AS Ad,
+      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+        ISNULL(u.PortNum, ''), ' ',''),'-',''),'+',''),'(',''),')','') AS Telefon
+    FROM WST1 w WITH(NOLOCK)
+    INNER JOIN OUSR u WITH(NOLOCK) ON w.UserID = u.USERID
+    WHERE ISNULL(u.PortNum, '') <> ''
+  `, {}, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Onay Bekleyen Belgeler — OWDD + WDD1 + OUSR
 //
 // SAP B1 onay sürecinde "W" (Waiting) durumundaki tüm belgeleri
@@ -886,4 +904,4 @@ async function runRawQuery(queryText, dbName) {
   return await execute(queryText, {}, dbName);
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };
