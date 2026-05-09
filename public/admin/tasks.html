@@ -172,6 +172,7 @@
 <script src="/admin/admin-i18n.js"></script>
 <script>
 let _types     = {};
+let _tasksMap  = {};
 let _phones    = [];
 let _bsModal   = null;
 let _templates = []; // onaylı Meta şablonları
@@ -230,6 +231,9 @@ function renderCards(tasks) {
 
   const PERIOD_LABELS = { weekly:'Haftalık', biweekly:'2 Haftalık', monthly:'Aylık', quarterly:'3 Aylık', semiannual:'6 Aylık', annual:'Yıllık' };
 
+  _tasksMap = {};
+  tasks.forEach(t => { _tasksMap[t.id] = t; });
+
   list.innerHTML = `<div class="col-12"><div class="card"><div class="card-body p-0">
     <table class="table table-hover mb-0 align-middle">
       <thead class="table-light">
@@ -265,7 +269,7 @@ function renderCards(tasks) {
           </td>
           <td class="pe-3">
             <div class="d-flex gap-1 justify-content-end">
-              <button class="btn btn-outline-secondary btn-sm px-2" onclick="editTask(${esc2(t)})" title="Düzenle">
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="editTask('${t.id}')" title="Düzenle">
                 <i class="bi bi-pencil"></i>
               </button>
               <button class="btn btn-outline-danger btn-sm px-2" onclick="deleteTask('${t.id}', '${esc(t.name)}')" title="Sil">
@@ -318,7 +322,7 @@ function openModal(task) {
   _bsModal.show();
 }
 
-function editTask(task) { openModal(task); }
+function editTask(id) { openModal(_tasksMap[id]); }
 
 function onTypeChange(val) {
   const v    = val || document.getElementById('taskType').value;
