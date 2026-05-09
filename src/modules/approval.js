@@ -47,12 +47,10 @@ async function handleApproval({ from, docEntry }) {
 // ─────────────────────────────────────────────────────────────
 async function listPendingOrders({ from }) {
   try {
-    const phone10 = _normPhone(from);
-    const all     = await getOnayBekleyenler();
-    const orders  = all.filter(r => _normPhone(r.OnaylayanTelefon) === phone10);
+    const orders = await getOnayBekleyenler();
 
     if (orders.length === 0) {
-      return sendText(from, '✅ Bugün bekleyen onayınız bulunmamaktadır.');
+      return sendText(from, '✅ Bekleyen onayınız bulunmamaktadır.');
     }
 
     const rows = orders.slice(0, 10).map(o => ({
@@ -80,15 +78,11 @@ async function listPendingOrders({ from }) {
 // ─────────────────────────────────────────────────────────────
 async function showOrderDetail({ from, wddCode }) {
   try {
-    const phone10 = _normPhone(from);
-    const all     = await getOnayBekleyenler();
-    const order   = all.find(r =>
-      String(r.WddCode) === String(wddCode) &&
-      _normPhone(r.OnaylayanTelefon) === phone10
-    );
+    const all   = await getOnayBekleyenler();
+    const order = all.find(r => String(r.WddCode) === String(wddCode));
 
     if (!order) {
-      return sendText(from, '⚠️ Onay kaydı bulunamadı veya bu belge size ait değil.');
+      return sendText(from, '⚠️ Onay kaydı bulunamadı.');
     }
 
     const bodyText = [
@@ -128,15 +122,11 @@ async function confirmApproval({ from, docEntry, action }) {
   }
 
   try {
-    const phone10  = _normPhone(from);
-    const all      = await getOnayBekleyenler();
-    const onayRow  = all.find(r =>
-      String(r.WddCode) === String(docEntry) &&
-      _normPhone(r.OnaylayanTelefon) === phone10
-    );
+    const all     = await getOnayBekleyenler();
+    const onayRow = all.find(r => String(r.WddCode) === String(docEntry));
 
     if (!onayRow) {
-      return sendText(from, '⚠️ Onay kaydı bulunamadı veya bu belge size ait değil.');
+      return sendText(from, '⚠️ Onay kaydı bulunamadı.');
     }
 
     const session   = getSession(from);
@@ -197,10 +187,6 @@ async function confirmApproval({ from, docEntry, action }) {
 
 function isApprover(phoneNumber) {
   return readApprovers().some(a => a.phone === phoneNumber);
-}
-
-function _normPhone(raw) {
-  return String(raw || '').replace(/\D/g, '').slice(-10);
 }
 
 function _formatMoney(amount) {

@@ -434,9 +434,7 @@ async function getOnayBekleyenler({ dbName } = {}) {
     LEFT  JOIN ODRF dr WITH(NOLOCK) ON d.DraftEntry = dr.DocEntry
     WHERE d.Status = 'W'
       AND w.Status = 'W'
-      AND u.PortNum IS NOT NULL
-      AND u.PortNum <> ''
-      AND CAST(d.CreateDate AS DATE) >= CAST(GETDATE() AS DATE)
+      AND CAST(d.CreateDate AS DATE) >= CAST(DATEADD(DAY, -30, GETDATE()) AS DATE)
     ORDER BY d.CreateDate DESC
   `, {}, dbName);
 }
