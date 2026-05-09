@@ -45,7 +45,7 @@
       </button>
     </div>
 
-    <div id="taskList" class="row g-3"></div>
+    <div id="taskList"></div>
     <div id="emptyState" class="text-center py-5 text-muted" style="display:none">
       <i class="bi bi-clock" style="font-size:2.5rem;opacity:.3"></i>
       <p class="mt-3">Henüz zamanlanmış görev yok.<br>
@@ -228,46 +228,58 @@ function renderCards(tasks) {
   }
   empty.style.display = 'none';
 
-  list.innerHTML = tasks.map(t => `
-    <div class="col-md-6 col-lg-4">
-      <div class="card h-100">
-        <div class="card-header d-flex justify-content-between align-items-center py-2">
-          <span style="font-size:.88rem;font-weight:600">${esc(t.name)}</span>
-          <div class="d-flex gap-1">
-            <span class="badge ${t.enabled ? 'bg-success' : 'bg-secondary'}" style="font-size:.7rem">
-              ${t.enabled ? 'Aktif' : 'Pasif'}
-            </span>
-          </div>
-        </div>
-        <div class="card-body py-3">
-          <div class="mb-2" style="font-size:.8rem;color:#94a3b8">
-            <i class="bi bi-tag me-1"></i>${esc(_types[t.type] || t.type)}
-          </div>
-          <div class="mb-2" style="font-size:.8rem;color:#94a3b8">
-            <i class="bi bi-clock me-1"></i>Her gün <strong style="color:#e2e8f0">${esc(t.time)}</strong>
-          </div>
-          <div style="font-size:.78rem;color:#94a3b8">
-            <i class="bi bi-telephone me-1"></i>
-            ${(t.phones || []).map(p => `<span class="badge bg-light text-dark border me-1">${esc(p)}</span>`).join('')}
-          </div>
-          ${t.query ? `<div class="mt-2 p-1 rounded font-monospace" style="font-size:.72rem;color:#7dd3fc;background:#0d1117;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="${esc(t.query)}">${esc(t.query)}</div>` : ''}
-          ${t.period ? `<div class="mt-2" style="font-size:.78rem;color:#94a3b8"><i class="bi bi-calendar-range me-1" style="color:#6cb2eb"></i>Dönem: <span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25">${{'weekly':'Haftalık','biweekly':'2 Haftalık','monthly':'Aylık','quarterly':'3 Aylık','semiannual':'6 Aylık','annual':'Yıllık'}[t.period]||t.period}</span></div>` : ''}
-          ${t.templateName ? `<div class="mt-2" style="font-size:.78rem;color:#94a3b8"><i class="bi bi-chat-square-text me-1" style="color:#25d366"></i>Şablon: <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25">${esc(t.templateName)}</span></div>` : ''}
-        </div>
-        <div class="card-footer d-flex gap-2 py-2" style="background:transparent;border-color:rgba(255,255,255,.08)">
-          <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="editTask(${esc2(t)})">
-            <i class="bi bi-pencil me-1"></i>Düzenle
-          </button>
-          <button class="btn btn-outline-danger btn-sm" onclick="deleteTask('${t.id}', '${esc(t.name)}')">
-            <i class="bi bi-trash"></i>
-          </button>
-          <button class="btn btn-outline-${t.enabled ? 'warning' : 'success'} btn-sm" onclick="toggleTask('${t.id}', ${!t.enabled})">
-            <i class="bi bi-${t.enabled ? 'pause' : 'play'}"></i>
-          </button>
-        </div>
-      </div>
-    </div>
-  `).join('');
+  const PERIOD_LABELS = { weekly:'Haftalık', biweekly:'2 Haftalık', monthly:'Aylık', quarterly:'3 Aylık', semiannual:'6 Aylık', annual:'Yıllık' };
+
+  list.innerHTML = `<div class="col-12"><div class="card"><div class="card-body p-0">
+    <table class="table table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:36px"></th>
+          <th>Görev Adı</th>
+          <th>Tip</th>
+          <th>Saat</th>
+          <th>Telefon(lar)</th>
+          <th>Dönem / Şablon</th>
+          <th style="width:130px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tasks.map(t => `
+        <tr>
+          <td class="ps-3">
+            <span class="badge rounded-pill ${t.enabled ? 'bg-success' : 'bg-secondary'}" title="${t.enabled ? 'Aktif' : 'Pasif'}" style="font-size:.65rem;padding:4px 7px">${t.enabled ? '●' : '○'}</span>
+          </td>
+          <td>
+            <div class="fw-semibold" style="font-size:.9rem">${esc(t.name)}</div>
+            ${t.query ? `<div class="font-monospace text-truncate text-info" style="font-size:.72rem;max-width:220px" title="${esc(t.query)}">${esc(t.query)}</div>` : ''}
+          </td>
+          <td><span class="badge bg-primary bg-opacity-15 text-primary border border-primary border-opacity-25" style="font-size:.75rem">${esc(_types[t.type] || t.type)}</span></td>
+          <td><span class="fw-semibold" style="font-size:.9rem;letter-spacing:.03em"><i class="bi bi-clock me-1 text-muted" style="font-size:.8rem"></i>${esc(t.time)}</span></td>
+          <td>
+            ${(t.phones || []).map(p => `<span class="badge bg-light text-dark border me-1 mb-1" style="font-size:.77rem;font-weight:500">${esc(p)}</span>`).join('')}
+          </td>
+          <td>
+            ${t.period ? `<span class="badge bg-info bg-opacity-15 text-info border border-info border-opacity-25 me-1" style="font-size:.75rem">${PERIOD_LABELS[t.period]||t.period}</span>` : ''}
+            ${t.templateName ? `<span class="badge bg-success bg-opacity-15 text-success border border-success border-opacity-25" style="font-size:.75rem"><i class="bi bi-whatsapp me-1"></i>${esc(t.templateName)}</span>` : ''}
+            ${!t.period && !t.templateName ? '<span class="text-muted" style="font-size:.8rem">—</span>' : ''}
+          </td>
+          <td class="pe-3">
+            <div class="d-flex gap-1 justify-content-end">
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="editTask(${esc2(t)})" title="Düzenle">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button class="btn btn-outline-danger btn-sm px-2" onclick="deleteTask('${t.id}', '${esc(t.name)}')" title="Sil">
+                <i class="bi bi-trash"></i>
+              </button>
+              <button class="btn btn-outline-${t.enabled ? 'warning' : 'success'} btn-sm px-2" onclick="toggleTask('${t.id}', ${!t.enabled})" title="${t.enabled ? 'Duraklat' : 'Başlat'}">
+                <i class="bi bi-${t.enabled ? 'pause-fill' : 'play-fill'}"></i>
+              </button>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div></div></div>`;
 }
 
 function _fillTemplateSelect(selectedName) {
