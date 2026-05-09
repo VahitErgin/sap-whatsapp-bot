@@ -207,14 +207,14 @@ POST /PurchaseOrders(DocEntry)/Reject
 | ItemCode | Ürün kodu (PK) |
 | ItemName | Ürün adı |
 | QuantityOnStock | Toplam stok miktarı (tüm depolar) |
-| QuantityOnOrder | Açık siparişteki miktar |
 | AvgStdPrice | Ortalama maliyet |
 | SalesPrice | Satış fiyatı |
 | ItemType | itItems / itLabor / itTravel |
 | Frozen | tYES / tNO (pasif mi?) |
 
-> ⚠️ `SalesPrice` $select'e eklenebilir ama bazı SAP versiyonlarında hata verebilir.
-> Fiyat isteniyorsa sadece `AvgStdPrice` kullan.
+> ⚠️ `QuantityOnOrder` Items endpoint'inde YOKTUR — kullanma, hata verir.
+> Açık sipariş/satış miktarı için SQL kullan: OITM.OnOrder (alım siparişi), OITM.IsCommited (satış siparişi).
+> `SalesPrice` bazı SAP versiyonlarında hata verebilir, fiyat istenirse `AvgStdPrice` kullan.
 
 #### En yüksek stoktaki ürünler
 ```
