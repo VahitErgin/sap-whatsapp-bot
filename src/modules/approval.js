@@ -29,16 +29,9 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 // 1. Bekleyen onayları listele veya belge detayı göster
 // ─────────────────────────────────────────────────────────────
 async function handleApproval({ from, docEntry }) {
-  if (!isApprover(from)) {
-    return sendText(from,
-      '🚫 Satın alma onayı için yetkiniz bulunmamaktadır.\nLütfen sistem yöneticinizle iletişime geçin.'
-    );
-  }
-
   if (docEntry) {
     return showOrderDetail({ from, wddCode: docEntry });
   }
-
   return listPendingOrders({ from });
 }
 
@@ -93,15 +86,19 @@ async function showOrderDetail({ from, wddCode }) {
       order.Aciklama ? `📝 *Açıklama:* ${_truncate(order.Aciklama, 80)}` : '',
     ].filter(Boolean).join('\n');
 
-    await sendButtons(
-      from,
-      `Belge #${order.DocNum}`,
-      bodyText,
-      [
-        { id: `APPROVE:${wddCode}`, title: '✅ Onayla' },
-        { id: `REJECT:${wddCode}`,  title: '❌ Reddet' },
-      ]
-    );
+    if (isApprover(from)) {
+      await sendButtons(
+        from,
+        `Belge #${order.DocNum}`,
+        bodyText,
+        [
+          { id: `APPROVE:${wddCode}`, title: '✅ Onayla' },
+          { id: `REJECT:${wddCode}`,  title: '❌ Reddet' },
+        ]
+      );
+    } else {
+      await sendText(from, `📄 *Belge #${order.DocNum}*\n\n${bodyText}\n\n🔒 Bu belge için onay yetkiniz bulunmamaktadır.`);
+    }
 
   } catch (err) {
     console.error('[Approval] Detay hatası:', err.message);
