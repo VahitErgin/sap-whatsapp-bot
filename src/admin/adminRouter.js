@@ -219,6 +219,9 @@ router.get('/api/settings', requireAuth, (req, res) => {
     // Bildirim & Diğer
     SERVIS_NOTIF_TEMPLATE:   env.SERVIS_NOTIF_TEMPLATE     || '',
     STOCK_PRICE_LIST:        env.STOCK_PRICE_LIST           || '1',
+    // Gönderim Modu
+    NOTIF_MODE:              env.NOTIF_MODE                 || 'live',
+    NOTIF_TEST_PHONE:        env.NOTIF_TEST_PHONE           || '',
     MAX_USERS:               env.MAX_USERS                  || '',
     // Admin
     ADMIN_USERNAME:          getAdminCfg().username        || 'admin',
@@ -233,6 +236,7 @@ router.post('/api/settings', requireAuth, (req, res) => {
     'SAP_DB_TYPE', 'SAP_DB_SERVER', 'SAP_DB_PORT', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
     'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',
     'SERVIS_NOTIF_TEMPLATE', 'STOCK_PRICE_LIST',
+    'NOTIF_MODE', 'NOTIF_TEST_PHONE',
   ];
   const sensitiveKeys = new Set(['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'SAP_PASSWORD', 'SAP_DB_PASSWORD']);
   const updates = {};

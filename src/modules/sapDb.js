@@ -267,7 +267,7 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateF
         T1.customer,
         T0.srvcCallID,
         T1.internalSN,
-        T0.itemName,
+        T1.itemName,
         NULL          AS GelenBelge,
         NULL          AS BelgeTarih,
         NULL          AS KargoNo,
@@ -283,8 +283,8 @@ async function getHizmetDurumu({ cardCode, serialNo, callId, statusFilter, dateF
         NULL          AS Aciklama
       FROM SCL1 T0 WITH(NOLOCK)
       INNER JOIN OSCL T1 WITH(NOLOCK) ON T0.srvcCallID = T1.callID
-      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID  = T3.SltCode
-      LEFT JOIN OSST T4 WITH(NOLOCK) ON T3.StatusNum   = T4.Number
+      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID = T3.SltCode
+      LEFT JOIN OSST T4 WITH(NOLOCK) ON T3.StatusNum = T4.Number
     ) v
     ${where}
     ORDER BY createDate DESC
@@ -361,14 +361,14 @@ async function getServisGuncellemeleri({ dbName } = {}) {
         T1.customer,
         T0.srvcCallID,
         T1.internalSN,
-        T0.itemName,
+        T1.itemName,
         T1.createDate,
         T3.Subject AS Durum,
         T1.status,
         T1.Telephone
       FROM SCL1 T0 WITH(NOLOCK)
       INNER JOIN OSCL T1 WITH(NOLOCK) ON T0.srvcCallID = T1.callID
-      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID  = T3.SltCode
+      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID = T3.SltCode
     ) v
     ORDER BY createDate DESC
   `, {}, dbName);

@@ -74,6 +74,15 @@ async function sendMenu(to, text) {
 //          [{ type: 'text', text: '14' }, { type: 'text', text: 'Teslim Edildi' }])
 // ─────────────────────────────────────────────────────────────
 async function sendTemplate(to, templateName, language, components) {
+  if (process.env.NOTIF_MODE === 'test') {
+    const testPhone = (process.env.NOTIF_TEST_PHONE || '').trim();
+    if (!testPhone) {
+      console.warn(`[WA] Test modu aktif ama NOTIF_TEST_PHONE tanımlı değil — şablon atlandı (hedef: ${to})`);
+      return;
+    }
+    console.log(`[WA] TEST MODU → şablon "${templateName}" hedefi ${to} yerine ${testPhone} adresine yönlendirildi`);
+    to = testPhone;
+  }
   return _send(to, {
     type: 'template',
     template: {

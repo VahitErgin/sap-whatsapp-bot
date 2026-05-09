@@ -466,6 +466,46 @@
         </div>
       </div>
 
+      <!-- Gönderim Modu -->
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-send me-2"></i>WhatsApp Gönderim Modu</span>
+            <span id="notifModeBadge" class="badge"></span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              <b>Test modunda</b> tüm otomatik bildirimler (servis, onay, fatura) gerçek alıcı yerine
+              aşağıdaki test numarasına gönderilir. Meta geliştirme hesabında sadece onaylı numaralar
+              mesaj alabilir.
+            </p>
+            <div class="mb-3 d-flex gap-4">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="notifMode" id="modeTest" value="test">
+                <label class="form-check-label fw-semibold" for="modeTest">
+                  🧪 Test
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="notifMode" id="modeLive" value="live" checked>
+                <label class="form-check-label fw-semibold" for="modeLive">
+                  🟢 Canlı
+                </label>
+              </div>
+            </div>
+            <div id="testPhoneRow" class="mb-3 d-none">
+              <label class="form-label fw-semibold small">Test Telefon Numarası</label>
+              <input type="text" class="form-control form-control-sm" id="notifTestPhone"
+                placeholder="905XXXXXXXXX" maxlength="15">
+              <div class="form-text">Tüm bildirimler bu numaraya yönlendirilir. Meta test listesinde kayıtlı olmalı.</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveNotifMode()">
+              <i class="bi bi-floppy me-1"></i>Kaydet
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Bildirim & Diğer -->
       <div class="col-md-6">
         <div class="card h-100">
@@ -608,6 +648,12 @@ async function loadSettings() {
   // Bildirim & Diğer
   document.getElementById('servisTemplate').value  = data.SERVIS_NOTIF_TEMPLATE || '';
   document.getElementById('stockPriceList').value  = data.STOCK_PRICE_LIST       || '1';
+
+  // Gönderim Modu
+  const mode = data.NOTIF_MODE || 'live';
+  document.querySelector(`input[name="notifMode"][value="${mode}"]`).checked = true;
+  document.getElementById('notifTestPhone').value = data.NOTIF_TEST_PHONE || '';
+  updateNotifModeUI(mode);
 
   // Admin kullanıcı adı
   document.getElementById('adminUsername').value = data.ADMIN_USERNAME || '';
@@ -760,6 +806,33 @@ async function saveOpenaiKey() {
     document.getElementById('openaiKey').value = '';
     loadSettings();
   } else { showAlert(data.error, 'danger'); }
+}
+
+function updateNotifModeUI(mode) {
+  const isTest = mode === 'test';
+  document.getElementById('testPhoneRow').classList.toggle('d-none', !isTest);
+  const badge = document.getElementById('notifModeBadge');
+  badge.textContent = isTest ? '🧪 Test' : '🟢 Canlı';
+  badge.className   = `badge ${isTest ? 'bg-warning text-dark' : 'bg-success'}`;
+}
+
+document.querySelectorAll('input[name="notifMode"]').forEach(el => {
+  el.addEventListener('change', () => updateNotifModeUI(el.value));
+});
+
+async function saveNotifMode() {
+  const mode  = document.querySelector('input[name="notifMode"]:checked').value;
+  const phone = document.getElementById('notifTestPhone').value.trim();
+  if (mode === 'test' && !phone) {
+    return showAlert('Test modu için telefon numarası girilmeli', 'danger');
+  }
+  const res  = await fetch('/admin/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ NOTIF_MODE: mode, NOTIF_TEST_PHONE: phone }),
+  });
+  const data = await res.json();
+  if (res.ok) { showAlert('Gönderim modu kaydedildi'); updateNotifModeUI(mode); }
+  else showAlert(data.error, 'danger');
 }
 
 async function saveNotifSettings() {
