@@ -311,7 +311,7 @@ function _keywordIntent(text) {
   if (t === 'dil seç' || t === 'select language' || t === 'اختر اللغة' || t === '/dil' || t === '/lang')
     return { intent: 'lang', confidence: 0.99, reason: 'keyword' };
 
-  if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay'))
+  if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay') || t.includes('onay bekleyen'))
     return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
 
   // Lead: aday müşteri / lead ekleme
