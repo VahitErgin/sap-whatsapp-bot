@@ -180,17 +180,15 @@ GET /Orders?$filter=DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'
 | DocDueDate | Teslim tarihi |
 | DocTotal | Toplam tutar |
 | DocumentStatus | bost_Open / bost_Close |
-| ApprovalStatus | Onay durumu |
 
-#### Onay bekleyen siparişler
-```
-GET /PurchaseOrders?$filter=DocumentStatus eq 'bost_Open' and ApprovalStatus eq 'asPendingApproval'
-```
+> ⚠️ `ApprovalStatus` PurchaseOrders endpoint'inde YOKTUR — kullanma, hata verir.
+> Onay durumu Service Layer üzerinden filtrelenemez; açık siparişleri `DocumentStatus eq 'bost_Open'` ile listele.
 
-#### Onay aksiyonları
+#### Açık satın alma siparişleri
 ```
-POST /PurchaseOrders(DocEntry)/Approve
-POST /PurchaseOrders(DocEntry)/Reject
+GET /PurchaseOrders?$filter=DocumentStatus eq 'bost_Open'
+  &$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal
+  &$orderby=DocDate asc&$top=50
 ```
 
 ---
