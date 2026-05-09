@@ -110,6 +110,12 @@
               <div class="col-md-4">
                 <label class="form-label fw-semibold small">Phone Number ID</label>
                 <input type="text" class="form-control form-control-sm" id="waPhoneId" placeholder="104179379317345">
+                <div class="form-text">Meta Developer → WhatsApp → API Setup → Phone Number ID</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold small">WhatsApp Business Account ID (WABA ID)</label>
+                <input type="text" class="form-control form-control-sm" id="waWabaId" placeholder="123456789012345">
+                <div class="form-text">Meta Developer → WhatsApp → API Setup → WhatsApp Business Account ID</div>
               </div>
               <div class="col-md-4">
                 <label class="form-label fw-semibold small">Verify Token</label>
@@ -610,6 +616,7 @@ async function loadSettings() {
 
   // WhatsApp
   document.getElementById('waPhoneId').value = data.WA_PHONE_NUMBER_ID || '';
+  document.getElementById('waWabaId').value  = data.WA_WABA_ID         || '';
   document.getElementById('waVerify').value  = data.WA_VERIFY_TOKEN    || '';
   document.getElementById('waTokenStatus').textContent =
     data.WA_ACCESS_TOKEN_SET ? '✓ Token kayıtlı (değiştirmek için yeni token gir)' : '⚠ Token tanımlı değil';
@@ -734,6 +741,7 @@ async function testSqlDb() {
 async function saveSettings() {
   const body = {
     WA_PHONE_NUMBER_ID: document.getElementById('waPhoneId').value.trim(),
+    WA_WABA_ID:         document.getElementById('waWabaId').value.trim(),
     WA_VERIFY_TOKEN:    document.getElementById('waVerify').value.trim(),
   };
   const token = document.getElementById('waToken').value.trim();

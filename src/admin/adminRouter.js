@@ -199,6 +199,7 @@ router.get('/api/settings', requireAuth, (req, res) => {
     SAP_PASSWORD_SET:        !!env.SAP_PASSWORD,
     // WhatsApp
     WA_PHONE_NUMBER_ID:      env.WA_PHONE_NUMBER_ID        || '',
+    WA_WABA_ID:              env.WA_WABA_ID                || '',
     WA_VERIFY_TOKEN:         env.WA_VERIFY_TOKEN            || '',
     WA_ACCESS_TOKEN_SET:     !!env.WA_ACCESS_TOKEN,
     // SQL
@@ -231,7 +232,7 @@ router.get('/api/settings', requireAuth, (req, res) => {
 router.post('/api/settings', requireAuth, (req, res) => {
   const allowed = [
     'SAP_SERVICE_LAYER_URL', 'SAP_COMPANY_DB', 'SAP_DATABASES', 'SAP_USERNAME', 'SAP_PASSWORD',
-    'WA_PHONE_NUMBER_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN',
+    'WA_PHONE_NUMBER_ID', 'WA_WABA_ID', 'WA_VERIFY_TOKEN', 'WA_ACCESS_TOKEN',
     'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
     'SAP_DB_TYPE', 'SAP_DB_SERVER', 'SAP_DB_PORT', 'SAP_DB_NAME', 'SAP_DB_USER', 'SAP_DB_PASSWORD',
     'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',

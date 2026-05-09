@@ -12,10 +12,11 @@ module.exports = {
   env: process.env.NODE_ENV || 'development',
 
   whatsapp: {
-    phoneNumberId: required('WA_PHONE_NUMBER_ID'),   // FIX: eski kod telefon numarasını key sanıyordu
-    accessToken:   required('WA_ACCESS_TOKEN'),
-    verifyToken:   required('WA_VERIFY_TOKEN'),
-    apiUrl:        'https://graph.facebook.com/v19.0',
+    phoneNumberId:  required('WA_PHONE_NUMBER_ID'),
+    wabaId:         process.env.WA_WABA_ID || '',   // WhatsApp Business Account ID (şablon yönetimi için)
+    accessToken:    required('WA_ACCESS_TOKEN'),
+    verifyToken:    required('WA_VERIFY_TOKEN'),
+    apiUrl:         'https://graph.facebook.com/v19.0',
   },
 
   sap: {
