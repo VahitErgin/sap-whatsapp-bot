@@ -348,28 +348,20 @@ async function resolveCardCode({ cardName, currency, dbName }) {
 async function getServisGuncellemeleri({ dbName } = {}) {
   return await execute(`
     SELECT TOP 500
-      srvcCallID  AS CagriNo,
-      customer    AS Musteri,
-      internalSN  AS SeriNo,
-      itemName    AS UrunAdi,
-      status      AS StatusKod,
-      Durum       AS Durum,
-      Telephone   AS Telefon,
-      createDate  AS AcilisTarihi
-    FROM (
-      SELECT
-        T1.customer,
-        T0.srvcCallID,
-        T1.internalSN,
-        T1.itemName,
-        T1.createDate,
-        T3.Subject AS Durum,
-        T1.status,
-        T1.Telephone
-      FROM SCL1 T0 WITH(NOLOCK)
-      INNER JOIN OSCL T1 WITH(NOLOCK) ON T0.srvcCallID = T1.callID
-      LEFT JOIN OSLT T3 WITH(NOLOCK) ON T0.solutionID = T3.SltCode
-    ) v
+      callID     AS CagriNo,
+      customer   AS Musteri,
+      internalSN AS SeriNo,
+      itemName   AS UrunAdi,
+      status     AS StatusKod,
+      CASE status
+        WHEN -3 THEN 'Açık'
+        WHEN -2 THEN 'Beklemede'
+        WHEN -1 THEN 'Kapalı'
+        ELSE 'Güncellendi'
+      END        AS Durum,
+      Telephone  AS Telefon,
+      createDate AS AcilisTarihi
+    FROM OSCL WITH(NOLOCK)
     ORDER BY createDate DESC
   `, {}, dbName);
 }
