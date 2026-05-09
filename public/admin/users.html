@@ -23,9 +23,9 @@
     <nav>
       <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a href="/admin/users"     class="nav-link active"><i class="bi bi-people"></i> Kullanıcılar</a>
-      <a href="/admin/approvers" class="nav-link"><i class="bi bi-person-check"></i> Onay Yetkilileri</a>
       <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
       <a href="/admin/tasks"     class="nav-link"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/docnotifier" class="nav-link"><i class="bi bi-bell"></i> Belge Bildirimi</a>
       <a href="/admin/logs"      class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
       <a href="/admin/settings"  class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
     </nav>
@@ -74,6 +74,20 @@
           <code id="fpCode" class="ms-2" style="font-size:.8rem;word-break:break-all"></code>
           <button class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1" onclick="copyFp()" title="Kopyala">
             <i class="bi bi-clipboard" style="font-size:.75rem"></i>
+          </button>
+        </div>
+        <hr class="my-3">
+        <div class="d-flex align-items-end gap-2">
+          <div class="flex-grow-1">
+            <label class="form-label fw-semibold small mb-1">
+              <i class="bi bi-bell me-1"></i>Bitiş Uyarı Telefonu
+            </label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="licNotifPhone"
+              placeholder="905XXXXXXXXX">
+            <div class="form-text">Son 10 günde her gün bu numaraya WhatsApp uyarısı gönderilir. Boş bırakılırsa uyarı gönderilmez.</div>
+          </div>
+          <button class="btn btn-primary btn-sm mb-4" onclick="saveLicNotifPhone()">
+            <i class="bi bi-floppy me-1"></i>Kaydet
           </button>
         </div>
       </div>
@@ -213,6 +227,23 @@ async function loadLicense() {
       det.innerHTML = `<span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Lisans yüklü değil</span>`;
     }
   } catch { /* silent */ }
+
+  try {
+    const res  = await fetch('/admin/api/settings');
+    const data = await res.json();
+    document.getElementById('licNotifPhone').value = data.LICENSE_NOTIF_PHONE || '';
+  } catch { /* silent */ }
+}
+
+async function saveLicNotifPhone() {
+  const phone = document.getElementById('licNotifPhone').value.trim();
+  const res   = await fetch('/admin/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ LICENSE_NOTIF_PHONE: phone }),
+  });
+  const data = await res.json();
+  if (res.ok) showToast('Uyarı telefonu kaydedildi', 'success');
+  else showToast(data.error || 'Hata', 'danger');
 }
 
 async function load() {
@@ -377,8 +408,21 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function showToast(msg, type = 'info') {
+  const id = 'toast-' + Date.now();
+  document.getElementById('toast-container').insertAdjacentHTML('beforeend', `
+    <div id="${id}" class="toast align-items-center text-bg-${type} border-0 show" role="alert">
+      <div class="d-flex">
+        <div class="toast-body">${msg}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>`);
+  setTimeout(() => document.getElementById(id)?.remove(), 4000);
+}
+
 loadLicense();
 load();
 </script>
+<div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index:9999"></div>
 </body>
 </html>

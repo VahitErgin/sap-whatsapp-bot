@@ -1,6 +1,7 @@
 'use strict';
 
 const { getUserByPhone, getCustomerByPhone } = require('./sapDb');
+const ohemService = require('../services/ohemService');
 const { getConnection }  = require('./sapClient');
 const config             = require('../config/config');
 const { getExplicitLang } = require('../services/langService');
@@ -77,8 +78,13 @@ async function resolveUser(phone, dbName) {
     let license = 'Professional';
     try {
       const sl       = getConnection(dbName || config.sap.companyDb);
-      const userData = await sl.get(`Users('${ousr.USER_CODE}')`);
-      license        = userData.UserLicense || 'Professional';
+      const usersRes = await sl.get('Users', {
+        '$filter': `UserCode eq '${ousr.USER_CODE}'`,
+        '$select': 'UserCode,UserLicense',
+        '$top':    '1',
+      });
+      const userData = usersRes?.value?.[0];
+      license        = userData?.UserLicense || 'Professional';
     } catch (err) {
       console.warn(`[UserAuth] SL lisans alınamadı (${ousr.USER_CODE}):`, err.message);
     }
@@ -116,6 +122,28 @@ async function resolveUser(phone, dbName) {
 
     _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
     console.log(`[UserAuth] ${phone10} → Müşteri ${ocpr.CardCode} (${ocpr.CardName}) lang=${user.lang}`);
+    return user;
+  }
+
+  // 3. OHEM: Admin panelden aktif edilmiş çalışan (kullanıcı bazlı lisans)
+  const ohemUser = ohemService.getUserByPhone(phone10);
+  if (ohemUser) {
+    const license = ohemUser.license || 'Professional';
+    const licCfg  = LICENSE_CONFIG[license] || DEFAULT_CONFIG;
+    const user = {
+      userCode:            ohemUser.userCode || null,
+      name:                ohemUser.name || phone10,
+      license,
+      isEmployee:          true,
+      isCustomer:          false,
+      customerCardCode:    null,
+      allowedIntents:      licCfg.allowedIntents,
+      cashflowRestriction: licCfg.cashflowRestriction,
+      lang:                getExplicitLang(phone10) ?? 'tr',
+      dbName:              dbName || null,
+    };
+    _cache.set(phone10, { user, expiresAt: Date.now() + CACHE_TTL });
+    console.log(`[UserAuth] ${phone10} → OHEM: ${user.name} (${license})`);
     return user;
   }
 

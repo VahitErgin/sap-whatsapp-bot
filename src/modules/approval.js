@@ -19,7 +19,7 @@ const https  = require('https');
 const config = require('../config/config');
 
 const { sendText, sendButtons, sendList } = require('../services/whatsappService');
-const { getOnayBekleyenler, getOnayYetkilileri } = require('./sapDb');
+const { getOnayBekleyenler, getOnaylayanByPhone } = require('./sapDb');
 const { getSession }                             = require('./sessionManager');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -85,7 +85,7 @@ async function showOrderDetail({ from, wddCode }) {
       order.Aciklama ? `📝 *Açıklama:* ${_truncate(order.Aciklama, 80)}` : '',
     ].filter(Boolean).join('\n');
 
-    if (await isApprover(from)) {
+    if (await isApprover(from, wddCode)) {
       await sendButtons(
         from,
         `Belge #${order.DocNum}`,
@@ -109,7 +109,7 @@ async function showOrderDetail({ from, wddCode }) {
 // 4. Onayla veya Reddet — SAP Service Layer
 // ─────────────────────────────────────────────────────────────
 async function confirmApproval({ from, docEntry, action }) {
-  if (!await isApprover(from)) {
+  if (!await isApprover(from, docEntry)) {
     return sendText(from, '🚫 Onay/red yetkisine sahip değilsiniz.');
   }
 
@@ -181,11 +181,12 @@ async function confirmApproval({ from, docEntry, action }) {
 // Yardımcı fonksiyonlar
 // ─────────────────────────────────────────────────────────────
 
-async function isApprover(phoneNumber) {
+// wddCode verilirse o belgeye özel, yoksa herhangi bir bekleyen onay için kontrol
+async function isApprover(phoneNumber, wddCode) {
   const phone10 = String(phoneNumber || '').replace(/\D/g, '').slice(-10);
   try {
-    const list = await getOnayYetkilileri();
-    return list.some(u => u.Telefon.slice(-10) === phone10);
+    const row = await getOnaylayanByPhone(phone10, wddCode || null);
+    return !!row;
   } catch {
     return false;
   }

@@ -22,7 +22,9 @@ const { sendText, sendButtons } = require('../services/whatsappService');
 const { writeLog }   = require('../services/logService');
 const { resolveUser, canAccessIntent } = require('../modules/userAuth');
 const { isAllowed, isEnabled }         = require('../services/userRegistry');
+const { getLicenseInfo }               = require('../services/licenseService');
 const { loginUser }  = require('../modules/sapAuth');
+const { getManagerB1Session } = require('../modules/sapClient');
 const { t } = require('../services/i18n');
 const { getLang, setLang }   = require('../services/langService');
 const { createSession, getSession, deleteSession, setAwaitingPassword, getAwaitingPassword, clearAwaitingPassword } = require('../modules/sessionManager');
@@ -33,6 +35,7 @@ const {
   getWizardState, confirmActivity, skipLocation,
   cancelAttachment,
   cancelActivityWizard,
+  handleAttachToExisting, handleAttachCodeInput, getAttachCodeState,
   handleCreateLead, handleLeadWizardInput, getLeadWizardState, confirmLead,
   cancelLeadWizard,
 } = require('../modules/crmActivity');
@@ -79,19 +82,48 @@ async function handleIncoming({ from, text }) {
       return await sendText(from, t(lang, 'login_failed'));
     }
 
-    // ── 2. Yetki kontrolü (OUSR veya OCPR) ───────────────────
+    // ── 2. Lisans kontrolü ───────────────────────────────────
+    // active=false: lisans yoksa, imza hatalıysa veya süresi dolmuşsa
+    const licInfo = getLicenseInfo();
+    if (!licInfo.active) {
+      const msg = licInfo.error?.includes('süresi dolmuş')
+        ? '⛔ Sistem lisansı süresi dolmuş. Lütfen yöneticinizle iletişime geçin.'
+        : '⛔ Geçerli bir sistem lisansı bulunamadı. Lütfen yöneticinizle iletişime geçin.';
+      return await sendText(from, msg);
+    }
+
+    // ── 2b. Yetki kontrolü (OUSR veya OCPR) ──────────────────
     const user = await resolveUser(from);
     if (!user) {
       return await sendText(from, t(getLang(from), 'unknown_user'));
     }
 
-    // ── 2a. Kayıt defteri — sadece OUSR (dahili) kullanıcılar ─
-    // OCPR (müşteri ilgili kişi) lisans limitinin dışındadır.
-    if (!user.isCustomer && isEnabled() && !isAllowed(from)) {
+    // ── 2c. Kayıt defteri — sadece OUSR (dahili) kullanıcılar ─
+    // OCPR (müşteri ilgili kişi) ve OHEM çalışanları lisans limitinin dışındadır.
+    if (!user.isCustomer && !user.isEmployee && isEnabled() && !isAllowed(from)) {
       console.log(`[Router] OUSR kayıt dışı: ${from}`);
       return await sendText(from,
         '🔒 Bot erişiminiz aktif değil.\nYöneticinizle iletişime geçin.'
       );
+    }
+
+    // ── 2e. OHEM çalışan — otomatik manager session ───────────
+    // Şifre sormadan manager cookie'siyle oturum aç (yoksa veya süresi dolduysa)
+    if (user.isEmployee && !getSession(from)) {
+      try {
+        const b1session = await getManagerB1Session(user.dbName || undefined);
+        if (b1session) {
+          createSession(from, {
+            userCode:   user.userCode || 'MANAGER',
+            employeeId: null,
+            userName:   user.name,
+            b1session,
+          });
+          console.log(`[Router] OHEM otomatik oturum: ${user.name} (${from})`);
+        }
+      } catch (err) {
+        console.warn(`[Router] OHEM manager session hatası (${from}):`, err.message);
+      }
     }
 
     // ── 3. Buton cevapları → direkt yönlendir ────────────────
@@ -177,7 +209,7 @@ async function handleIncoming({ from, text }) {
 
     // ── 4. Wizard modu ───────────────────────────────────────
     // Herhangi bir adımda "iptal / vazgeç / cancel" → wizard'ı temizle
-    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from);
+    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from) || getAttachCodeState(from);
     if (_inWizard && /^(iptal|vazgeç|vazgec|cancel|çıkış|cikis|dur|kapat)$/i.test(upper)) {
       cancelLeadWizard(from);
       cancelActivityWizard(from);
@@ -185,6 +217,7 @@ async function handleIncoming({ from, text }) {
       return await sendText(from, '🚫 İşlem iptal edildi.');
     }
 
+    if (getAttachCodeState(from))    return await handleAttachCodeInput(from, text);
     if (getLeadWizardState(from))    return await handleLeadWizardInput(from, text);
     if (getWizardState(from))        return await handleWizardInput(from, text);
     if (getServiceWizardState(from)) return await handleServiceWizardInput(from, text);
@@ -202,6 +235,10 @@ async function handleIncoming({ from, text }) {
     switch (intent.intent) {
 
       case 'login': {
+        if (user.isEmployee) {
+          // OHEM çalışanı — manager session zaten aktif, ayrıca giriş gerekmez
+          return await sendText(from, `✅ *${user.name}*, sisteme zaten bağlısınız.`);
+        }
         if (!user.userCode) {
           return await sendText(from, '⛔ Müşteri hesapları için oturum açma özelliği bulunmamaktadır.');
         }
@@ -228,6 +265,9 @@ async function handleIncoming({ from, text }) {
         }
         return await handleCreateLead({ from, session, dbName: user.dbName });
       }
+
+      case 'attach_file':
+        return await handleAttachToExisting({ from, text, dbName: user.dbName });
 
       case 'crm': {
         const session = getSession(from);
@@ -314,6 +354,10 @@ function _keywordIntent(text) {
   if (t.includes('onayla') || t.includes('reddet') || t.includes('bekleyen onay') || t.includes('onay bekleyen'))
     return { intent: 'approval', confidence: 0.93, reason: 'keyword' };
 
+  if (t.includes('dosya ekle') || t.includes('resim ekle') || t.includes('fotoğraf ekle') ||
+      t.includes('dosya eklemek') || t.includes('ek dosya') || t.includes('aktiviteye ekle'))
+    return { intent: 'attach_file', confidence: 0.95, reason: 'keyword' };
+
   // Lead: aday müşteri / lead ekleme
   if (
     /aday\s+müşteri\s+(ekle|oluştur|kaydet|tanımla)/.test(t) ||
@@ -373,16 +417,18 @@ const INTENT_SYSTEM = `Sen SAP Business One WhatsApp asistanının yönlendirici
 Kullanıcının mesajını analiz et ve hangi modüle yönlendirileceğini JSON olarak döndür.
 
 MODÜLLER:
-- "cashflow"  → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
-- "approval"  → Satın alma siparişi ONAYLAMA veya REDDETME
+- "cashflow"     → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
+- "approval"     → Satın alma siparişi ONAYLAMA veya REDDETME
 - "crm"          → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
+- "attach_file"  → Mevcut aktiviteye dosya/resim/belge EKLEME (dosya ekle, resim ekle, ek dosya)
 - "lead"         → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
 - "service_call" → Servis çağrısı / arıza bildirimi / teknik destek talebi OLUŞTURMA
 - "support"      → SAP hata mesajları, nasıl yapılır soruları, teknik destek
-- "help"      → Yardım menüsü
+- "help"         → Yardım menüsü
 
 KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
 KRİTİK: Bekleyen/açık servis GÖRME/LISTELEME → cashflow | Servis çağrısı OLUŞTURMA/AÇMA → service_call
+KRİTİK: Dosya/resim/belge ekleme → attach_file
 
 YANIT (sadece JSON):
 {"intent":"cashflow","confidence":0.9,"reason":"kısa açıklama"}`;

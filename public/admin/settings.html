@@ -23,9 +23,9 @@
     <nav>
       <a href="/admin"           class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a href="/admin/users"     class="nav-link"><i class="bi bi-people"></i> Kullanıcılar</a>
-      <a href="/admin/approvers" class="nav-link"><i class="bi bi-people"></i> Onay Yetkilileri</a>
       <a href="/admin/templates" class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
       <a href="/admin/tasks"     class="nav-link"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/docnotifier" class="nav-link"><i class="bi bi-bell"></i> Belge Bildirimi</a>
       <a href="/admin/logs"      class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
       <a href="/admin/settings"  class="nav-link active"><i class="bi bi-gear"></i> Ayarlar</a>
     </nav>
@@ -354,119 +354,109 @@
         </div>
       </div>
 
-      <!-- E-Belge Entegrasyonu -->
-      <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:#6cb2eb"></i><span data-i18n="card_edoc">E-Belge Entegrasyonu</span></div>
-          <div class="card-body">
-            <p class="text-muted small mb-3">
-              Entegratörünüzün görüntüleme URL'lerini girin. <code>{0}</code> yerine belgedeki <strong>NumAtCard</strong> (fatura numarası) alanı otomatik yerleştirilir.<br>
-              Örnek: <code>https://portal.example.com/doc/{0}.pdf</code>
-            </p>
-            <div class="row g-3">
-              <div class="col-12">
-                <label class="form-label fw-semibold small" data-i18n="lbl_efatura">E-Fatura Görüntüleme URL</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="edocEfatura" placeholder="https://.../{0}.pdf">
-              </div>
-              <div class="col-12">
-                <label class="form-label fw-semibold small" data-i18n="lbl_earsiv">E-Arşiv Görüntüleme URL</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="edocEarsiv" placeholder="https://.../{0}.pdf">
-              </div>
-              <div class="col-12">
-                <label class="form-label fw-semibold small" data-i18n="lbl_eirsaliye">E-İrsaliye Görüntüleme URL</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="edocEirsaliye" placeholder="https://.../{0}.pdf">
-              </div>
-              <div class="col-12">
-                <button class="btn btn-primary btn-sm" onclick="saveEdocSettings()">
-                  <i class="bi bi-floppy me-1"></i>E-Belge Ayarlarını Kaydet
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Dil Tercihleri -->
-      <div class="col-12">
-        <div class="card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <span><i class="bi bi-translate me-2" style="color:#6cb2eb"></i><span data-i18n="card_lang_pref">Kullanıcı Dil Tercihleri</span></span>
-            <button class="btn btn-outline-secondary btn-sm" onclick="loadLangSettings()">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
-          </div>
-          <div class="card-body">
-            <p class="text-muted small mb-3">
-              Kullanıcıların seçtiği dil tercihleri. Varsayılan dil Türkçe'dir (kayıtsız numara Türkçe alır).
-              Bir kaydı silmek o numarayı varsayılan (TR) diline döndürür.
-            </p>
-            <div class="table-responsive">
-              <table class="table table-sm table-hover" id="langTable">
-                <thead class="table-light">
-                  <tr>
-                    <th>Telefon</th>
-                    <th>Dil</th>
-                    <th style="width:60px"></th>
-                  </tr>
-                </thead>
-                <tbody id="langTableBody">
-                  <tr><td colspan="3" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span></td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Belge Bildirim Servisi -->
+      <!-- Çalışan Ana Veri (OHEM) Erişimi -->
       <div class="col-12">
         <div class="card">
           <div class="card-header d-flex align-items-center gap-2">
-            <i class="bi bi-file-earmark-arrow-up me-1" style="color:#6cb2eb"></i>
-            <span>Fatura / İrsaliye WhatsApp Bildirimi</span>
-            <span class="badge ms-auto small" id="docNotifBadge">Pasif</span>
+            <i class="bi bi-person-badge me-1" style="color:#6cb2eb"></i>
+            <span>Çalışan Ana Veri (OHEM) Erişimi</span>
+            <span class="badge ms-auto small" id="ohemBadge">Pasif</span>
           </div>
           <div class="card-body">
             <p class="text-muted small mb-3">
-              SAP'ta yeni fatura veya irsaliye kesildiğinde <strong>OCRD.Cellular</strong> alanındaki
-              telefona otomatik WhatsApp template bildirimi gönderir. Her 3 dakikada poll eder.<br>
-              Template parametreleri: <code>{{1}}</code> Müşteri adı · <code>{{2}}</code> Belge no ·
-              <code>{{3}}</code> Tutar · <code>{{4}}</code> Görüntüleme linki (U_BE1_UUID)
+              SAP B1 kullanıcı lisansı olmayan çalışanlar, OHEM tablosundaki telefon numarasıyla bota bağlanabilir.
+              Her çalışana ayrı yetki seviyesi atanır; SAP işlemleri manager oturumunu kullanır.
             </p>
-            <div class="row g-3">
-              <div class="col-12">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="docNotifEnabled">
-                  <label class="form-check-label fw-semibold small" for="docNotifEnabled">Belge Bildirimi Aktif</label>
-                </div>
+
+            <!-- Global toggle -->
+            <div class="d-flex align-items-center justify-content-between mb-3 pb-3 border-bottom">
+              <div>
+                <div class="fw-semibold small">OHEM Erişimini Aktif Et</div>
+                <small class="text-muted">Kapatılırsa listedeki tüm çalışanlar bota erişemez.</small>
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-semibold small">e-Fatura Template Adı</label>
-                <input type="text" class="form-control form-control-sm" id="docTplEfatura" placeholder="efatura_bildirimi">
-                <div class="form-text">Profile 1-4, 7 → e-Fatura</div>
+              <div class="form-check form-switch ms-3">
+                <input class="form-check-input" type="checkbox" id="ohemEnabled" style="width:2.5rem;height:1.3rem;" onchange="saveOhemGlobal()">
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-semibold small">e-Arşiv Template Adı</label>
-                <input type="text" class="form-control form-control-sm" id="docTplEarsiv" placeholder="earsiv_bildirimi">
-                <div class="form-text">Profile 5 (EARSIVFATURA) → e-Arşiv</div>
+            </div>
+
+            <!-- Butonlar -->
+            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+              <button class="btn btn-outline-primary btn-sm" onclick="loadOhemFromSap(this)">
+                <i class="bi bi-cloud-download me-1"></i>SAP'tan Yükle
+              </button>
+              <button class="btn btn-primary btn-sm" onclick="openOhemAddModal()">
+                <i class="bi bi-plus-lg me-1"></i>Kullanıcı Ekle
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" type="button"
+                data-bs-toggle="collapse" data-bs-target="#ohemTableCollapse"
+                onclick="toggleOhemBtn(this)">
+                <i class="bi bi-chevron-down me-1"></i>Listeyi Göster
+              </button>
+              <span id="ohemStatus" class="small text-muted ms-2"></span>
+            </div>
+
+            <!-- Tablo (varsayılan gizli) -->
+            <div class="collapse" id="ohemTableCollapse">
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:80px">Kod</th>
+                      <th>Ad Soyad</th>
+                      <th>Unvan</th>
+                      <th style="width:110px">Telefon</th>
+                      <th style="width:185px">Lisans Tipi</th>
+                      <th style="width:70px" class="text-center">Aktif</th>
+                      <th style="width:40px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="ohemTableBody">
+                    <tr><td colspan="7" class="text-center text-muted py-3">
+                      <span class="spinner-border spinner-border-sm"></span>
+                    </td></tr>
+                  </tbody>
+                </table>
               </div>
-              <div class="col-md-4">
-                <label class="form-label fw-semibold small">İrsaliye Template Adı</label>
-                <input type="text" class="form-control form-control-sm" id="docTplIrsaliye" placeholder="irsaliye_bildirimi">
-                <div class="form-text">ODLN tablosu → İrsaliye</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OHEM Kullanıcı Ekle/Düzenle Modal -->
+      <div class="modal fade" id="ohemModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title fw-semibold" id="ohemModalTitle">Kullanıcı Ekle</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div id="ohemModalAlert" class="alert alert-danger py-2 d-none"></div>
+              <input type="hidden" id="ohemEditIdx">
+              <div class="mb-3">
+                <label class="form-label fw-semibold small">Ad Soyad <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="ohemModalName" placeholder="Ahmet Yılmaz">
               </div>
-              <div class="col-12">
-                <label class="form-label fw-semibold small">Hariç Tutulacak Telefon Numaraları <span class="text-muted fw-normal">(satır satır)</span></label>
-                <textarea class="form-control form-control-sm font-monospace" id="docNotifExcluded"
-                  rows="3" placeholder="905551234567&#10;905559876543"></textarea>
-                <div class="form-text">Bu numaralara bildirim gönderilmez.</div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold small">Telefon <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="ohemModalPhone" placeholder="5XXXXXXXXX">
+                <div class="form-text">Son 10 hane (ülke kodu olmadan)</div>
               </div>
-              <div class="col-12 d-flex gap-2 align-items-center flex-wrap">
-                <button class="btn btn-primary btn-sm" onclick="saveDocNotifSettings()">
-                  <i class="bi bi-floppy me-1"></i>Kaydet
-                </button>
-                <div class="text-muted small" id="docNotifLastRun"></div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold small">Lisans Tipi</label>
+                <select class="form-select form-select-sm" id="ohemModalLicense">
+                  <option value="Professional">Professional – Tüm yetkiler</option>
+                  <option value="Limited Financial">Limited Financial – Sadece finans</option>
+                  <option value="Limited Logistics">Limited Logistics – Sadece lojistik</option>
+                  <option value="Limited CRM">Limited CRM – Sadece CRM</option>
+                </select>
               </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+              <button class="btn btn-primary btn-sm" onclick="saveOhemUser()">
+                <i class="bi bi-check-lg me-1"></i>Kaydet
+              </button>
             </div>
           </div>
         </div>
@@ -920,64 +910,6 @@ async function changePassword() {
   }
 }
 
-async function loadEdocSettings() {
-  const res  = await fetch('/admin/api/edoc-settings');
-  const data = await res.json();
-  document.getElementById('edocEfatura').value   = data.efatura   || '';
-  document.getElementById('edocEarsiv').value    = data.earsiv    || '';
-  document.getElementById('edocEirsaliye').value = data.eirsaliye || '';
-}
-
-async function saveEdocSettings() {
-  const body = {
-    efatura:   document.getElementById('edocEfatura').value.trim(),
-    earsiv:    document.getElementById('edocEarsiv').value.trim(),
-    eirsaliye: document.getElementById('edocEirsaliye').value.trim(),
-  };
-  const res  = await fetch('/admin/api/edoc-settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (res.ok) showAlert('E-Belge ayarları kaydedildi');
-  else showAlert(data.error || 'Hata', 'danger');
-}
-
-const LANG_LABELS = { tr: '🇹🇷 Türkçe', en: '🇬🇧 English', ar: '🇸🇦 العربية' };
-
-async function loadLangSettings() {
-  const tbody = document.getElementById('langTableBody');
-  tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span></td></tr>';
-  try {
-    const res  = await fetch('/admin/api/lang-settings');
-    const data = await res.json();
-    const entries = Object.entries(data);
-    if (!entries.length) {
-      tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">Kayıtlı tercih yok (hepsi varsayılan TR)</td></tr>';
-      return;
-    }
-    tbody.innerHTML = entries.map(([phone, lang]) => `
-      <tr>
-        <td class="font-monospace">${phone}</td>
-        <td>${LANG_LABELS[lang] || lang}</td>
-        <td>
-          <button class="btn btn-outline-danger btn-sm py-0 px-1" title="Sil" onclick="deleteLangPref('${phone}')">
-            <i class="bi bi-trash"></i>
-          </button>
-        </td>
-      </tr>`).join('');
-  } catch {
-    tbody.innerHTML = '<tr><td colspan="3" class="text-danger">Yüklenemedi</td></tr>';
-  }
-}
-
-async function deleteLangPref(phone) {
-  if (!confirm(`${phone} numarasının dil tercihini sıfırla (TR'ye döner)?`)) return;
-  await fetch(`/admin/api/lang-settings/${phone}`, { method: 'DELETE' });
-  loadLangSettings();
-}
-
 async function loadGraphSettings() {
   try {
     const res  = await fetch('/admin/api/graph-settings');
@@ -1034,47 +966,212 @@ async function testGraph() {
   }
 }
 
-async function loadDocNotifSettings() {
+// ── OHEM kullanıcı listesi (in-memory, kaydet basılana kadar) ─
+let _ohemUsers = [];
+
+const LICENSE_LABELS = {
+  'Professional':       'Professional',
+  'Limited Financial':  'Ltd. Financial',
+  'Limited Logistics':  'Ltd. Logistics',
+  'Limited CRM':        'Ltd. CRM',
+};
+
+async function loadOhemSettings() {
   try {
-    const res  = await fetch('/admin/api/doc-notifier');
+    const res  = await fetch('/admin/api/ohem');
     const data = await res.json();
-    document.getElementById('docNotifEnabled').checked   = !!data.enabled;
-    document.getElementById('docTplEfatura').value       = data.templates?.efatura   || '';
-    document.getElementById('docTplEarsiv').value        = data.templates?.earsiv    || '';
-    document.getElementById('docTplIrsaliye').value      = data.templates?.irsaliye  || '';
-    document.getElementById('docNotifExcluded').value    = (data.excludedPhones || []).join('\n');
-    document.getElementById('docNotifLastRun').textContent =
-      data.lastRun ? `Son çalışma: ${new Date(data.lastRun).toLocaleString('tr-TR')}` : 'Henüz çalışmadı';
-    const badge = document.getElementById('docNotifBadge');
+    _ohemUsers = data.users || [];
+    document.getElementById('ohemEnabled').checked = !!data.enabled;
+    const badge = document.getElementById('ohemBadge');
     badge.textContent = data.enabled ? 'Aktif' : 'Pasif';
-    badge.className = 'badge ms-auto small ' + (data.enabled ? 'bg-success' : 'bg-secondary');
+    badge.className   = 'badge ms-auto small ' + (data.enabled ? 'bg-success' : 'bg-secondary');
+    renderOhemTable();
   } catch { /* yoksay */ }
 }
 
-async function saveDocNotifSettings() {
-  const body = {
-    enabled: document.getElementById('docNotifEnabled').checked,
-    templates: {
-      efatura:  document.getElementById('docTplEfatura').value.trim(),
-      earsiv:   document.getElementById('docTplEarsiv').value.trim(),
-      irsaliye: document.getElementById('docTplIrsaliye').value.trim(),
-    },
-    excludedPhonesText: document.getElementById('docNotifExcluded').value,
-  };
-  const res  = await fetch('/admin/api/doc-notifier', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+function renderOhemTable() {
+  const tbody = document.getElementById('ohemTableBody');
+  if (!_ohemUsers.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">"SAP\'tan Yükle" veya "Kullanıcı Ekle" ile çalışan ekleyin.</td></tr>';
+    return;
+  }
+  const licenses = ['Professional','Limited Financial','Limited Logistics','Limited CRM'];
+  tbody.innerHTML = _ohemUsers.map((u, i) => `
+    <tr>
+      <td class="align-middle font-monospace small text-muted">${esc(u.code || '—')}</td>
+      <td class="align-middle">
+        <div class="fw-semibold small">${esc(u.name || '—')}</div>
+      </td>
+      <td class="align-middle small text-muted">${esc(u.jobTitle || '—')}</td>
+      <td class="align-middle font-monospace small">${u.phone || '—'}</td>
+      <td class="align-middle">
+        <select class="form-select form-select-sm py-0" onchange="ohemChangeLicense(${i}, this.value)">
+          ${licenses.map(l =>
+            `<option value="${l}" ${u.license===l?'selected':''}>${LICENSE_LABELS[l]}</option>`
+          ).join('')}
+        </select>
+      </td>
+      <td class="align-middle text-center">
+        <div class="form-check form-switch d-flex justify-content-center mb-0">
+          <input class="form-check-input" type="checkbox" ${u.enabled!==false?'checked':''}
+            onchange="ohemToggle(${i}, this.checked)">
+        </div>
+      </td>
+      <td class="align-middle text-center">
+        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="ohemDelete(${i})" title="Sil">
+          <i class="bi bi-trash" style="font-size:.75rem"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+function ohemChangeLicense(idx, val) {
+  _ohemUsers[idx].license = val;
+  persistOhemUsers();
+}
+
+function ohemToggle(idx, val) {
+  _ohemUsers[idx].enabled = val;
+  persistOhemUsers();
+}
+
+function ohemDelete(idx) {
+  _ohemUsers.splice(idx, 1);
+  renderOhemTable();
+  persistOhemUsers();
+}
+
+async function persistOhemUsers() {
+  const enabled = document.getElementById('ohemEnabled').checked;
+  await fetch('/admin/api/ohem', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, users: _ohemUsers }),
+  });
+}
+
+async function saveOhemGlobal() {
+  const enabled = document.getElementById('ohemEnabled').checked;
+  const badge = document.getElementById('ohemBadge');
+  badge.textContent = enabled ? 'Aktif' : 'Pasif';
+  badge.className   = 'badge ms-auto small ' + (enabled ? 'bg-success' : 'bg-secondary');
+  const res  = await fetch('/admin/api/ohem', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, users: _ohemUsers }),
   });
   const data = await res.json();
-  if (res.ok) { showAlert('Belge bildirim ayarları kaydedildi'); loadDocNotifSettings(); }
+  if (res.ok) showAlert('OHEM ayarı kaydedildi');
   else showAlert(data.error || 'Hata', 'danger');
 }
 
+function toggleOhemBtn(btn) {
+  const isOpen = document.getElementById('ohemTableCollapse').classList.contains('show');
+  // Bootstrap toggle henüz işlemedi, bu yüzden mevcut durumu ters al
+  if (isOpen) {
+    btn.innerHTML = '<i class="bi bi-chevron-down me-1"></i>Listeyi Göster';
+  } else {
+    btn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Listeyi Gizle';
+  }
+}
+
+function ohemMsg(msg, isErr) {
+  const el = document.getElementById('ohemStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'small ms-2 ' + (isErr ? 'text-danger' : 'text-success fw-semibold');
+  setTimeout(() => { el.textContent = ''; el.className = 'small text-muted ms-2'; }, 5000);
+}
+
+async function loadOhemFromSap(btn) {
+  btn.disabled = true;
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Yükleniyor...';
+  ohemMsg('SAP sorgulanıyor…');
+  try {
+    const res = await fetch('/admin/api/ohem/sap-employees');
+    if (!res.ok) {
+      const txt = await res.text();
+      let msg = txt;
+      try { msg = JSON.parse(txt).error || txt; } catch { /* raw text */ }
+      throw new Error(msg);
+    }
+    const employees = await res.json();
+
+    let added = 0;
+    for (const e of employees) {
+      if (!e.phone) continue;
+      const exists = _ohemUsers.some(u =>
+        String(u.phone||'').replace(/\D/g,'').slice(-10) === String(e.phone).slice(-10)
+      );
+      if (!exists) {
+        _ohemUsers.push({ code: e.code, name: e.name, jobTitle: e.jobTitle, phone: e.phone, userCode: e.userCode, license: e.license, enabled: false });
+        added++;
+      }
+    }
+    renderOhemTable();
+    if (added > 0) await persistOhemUsers();
+    ohemMsg(`${employees.length} çalışan bulundu, ${added} yeni eklendi.`);
+  } catch (err) {
+    ohemMsg('Hata: ' + err.message, true);
+    console.error('[OHEM] SAP yükleme hatası:', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
+
+function openOhemAddModal(idx) {
+  document.getElementById('ohemModalAlert').classList.add('d-none');
+  if (idx !== undefined) {
+    const u = _ohemUsers[idx];
+    document.getElementById('ohemModalTitle').textContent = 'Kullanıcı Düzenle';
+    document.getElementById('ohemEditIdx').value    = idx;
+    document.getElementById('ohemModalName').value  = u.name  || '';
+    document.getElementById('ohemModalPhone').value = u.phone || '';
+    document.getElementById('ohemModalLicense').value = u.license || 'Professional';
+  } else {
+    document.getElementById('ohemModalTitle').textContent = 'Kullanıcı Ekle';
+    document.getElementById('ohemEditIdx').value    = '';
+    document.getElementById('ohemModalName').value  = '';
+    document.getElementById('ohemModalPhone').value = '';
+    document.getElementById('ohemModalLicense').value = 'Professional';
+  }
+  new bootstrap.Modal(document.getElementById('ohemModal')).show();
+}
+
+async function saveOhemUser() {
+  const alertEl = document.getElementById('ohemModalAlert');
+  alertEl.classList.add('d-none');
+
+  const name    = document.getElementById('ohemModalName').value.trim();
+  const phone   = document.getElementById('ohemModalPhone').value.replace(/\D/g,'').slice(-10);
+  const license = document.getElementById('ohemModalLicense').value;
+  const editIdx = document.getElementById('ohemEditIdx').value;
+
+  if (!name)  { alertEl.textContent = 'Ad Soyad zorunlu'; alertEl.classList.remove('d-none'); return; }
+  if (!phone || phone.length < 10) { alertEl.textContent = 'Geçerli telefon giriniz'; alertEl.classList.remove('d-none'); return; }
+
+  const dupIdx = _ohemUsers.findIndex((u, i) =>
+    String(u.phone||'').replace(/\D/g,'').slice(-10) === phone && String(i) !== editIdx
+  );
+  if (dupIdx !== -1) { alertEl.textContent = 'Bu telefon zaten kayıtlı'; alertEl.classList.remove('d-none'); return; }
+
+  if (editIdx !== '') {
+    _ohemUsers[parseInt(editIdx)] = { ..._ohemUsers[parseInt(editIdx)], name, phone, license };
+  } else {
+    _ohemUsers.push({ name, phone, license, enabled: true });
+  }
+
+  bootstrap.Modal.getInstance(document.getElementById('ohemModal')).hide();
+  renderOhemTable();
+  await persistOhemUsers();
+  showAlert(editIdx !== '' ? 'Kullanıcı güncellendi' : 'Kullanıcı eklendi');
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 loadSettings();
-loadEdocSettings();
-loadLangSettings();
 loadGraphSettings();
-loadDocNotifSettings();
+loadOhemSettings();
 </script>
 </body>
 </html>

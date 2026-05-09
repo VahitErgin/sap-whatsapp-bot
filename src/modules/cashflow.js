@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -879,7 +879,39 @@ async function executeQueries(sl, queries, dbName) {
         data:        dataArr,
         count:       dataArr.length,
         error:       null,
+        lastDate:    null,
       };
+
+      // Sonuç boşsa ve sorgu tarih filtreli ise → son kayıt tarihini çek
+      if (dataArr.length === 0) {
+        const cardCode = q.params?.cardCode || null;
+        try {
+          // SQL endpoint → SAP tablo eşlemesi
+          const SQL_TABLE = {
+            SQL_IRSALIYE_SATIR: 'ODLN',
+            SQL_ACIK_SIPARIS:   'ORDR',
+          };
+          if (q.params?.docDate && SQL_TABLE[q.endpoint]) {
+            results[q.id].lastDate = await getLastDocDate({ tableName: SQL_TABLE[q.endpoint], cardCode, dbName });
+          } else if (['Invoices','DeliveryNotes','Orders','PurchaseOrders','PurchaseInvoices',
+                      'Quotations','CreditNotes','PurchaseCreditNotes','PurchaseDeliveryNotes'].includes(q.endpoint)) {
+            // OData: tarih içeren $filter varsa kaldır, son belgeyi çek
+            const filter = q.params?.['$filter'] || '';
+            if (/\d{4}-\d{2}-\d{2}/.test(filter)) {
+              const filterNoDate = filter
+                .replace(/\s*and\s+DocDate\s+[a-z]+\s+'[^']+'/gi, '')
+                .replace(/DocDate\s+[a-z]+\s+'[^']+'\s*and\s*/gi, '')
+                .replace(/DocDate\s+[a-z]+\s+'[^']+'/gi, '')
+                .trim().replace(/^\s*and\s+/i, '').trim();
+              const lastParams = { '$top': '1', '$orderby': 'DocDate desc', '$select': 'DocDate' };
+              if (filterNoDate) lastParams['$filter'] = filterNoDate;
+              const lastRes = await sl.get(q.endpoint, lastParams);
+              const lastRow = (lastRes?.value || [])[0];
+              if (lastRow?.DocDate) results[q.id].lastDate = lastRow.DocDate.split('T')[0];
+            }
+          }
+        } catch { /* son tarih alınamazsa sessizce geç */ }
+      }
     } catch (err) {
       console.error(`[Cashflow] SAP hata (${q.endpoint}):`, err.message);
       results[q.id] = {
@@ -1134,7 +1166,8 @@ function formatResultsLocal(_question, queries, results) {
 
     } else if (ep === 'SQL_IRSALIYE_SATIR') {
       if (!data.length) {
-        sec.push(`📭 *${r.description}*\nBugün sevk edilen ürün bulunamadı.`);
+        const lastNote = r.lastDate ? `\n📅 Son irsaliye: *${fmtDate(r.lastDate)}*` : '';
+        sec.push(`📭 *${r.description}*\nBugün sevk edilen ürün bulunamadı.${lastNote}`);
       } else {
         const byOrder = {};
         data.forEach(row => {
@@ -1162,7 +1195,8 @@ function formatResultsLocal(_question, queries, results) {
 
     } else if (ep === 'SQL_ACIK_SIPARIS') {
       if (!data.length) {
-        sec.push(`📭 *${r.description}*\nAçık sipariş satırı bulunamadı.`);
+        const lastNote = r.lastDate ? `\n📅 Son sipariş: *${fmtDate(r.lastDate)}*` : '';
+        sec.push(`📭 *${r.description}*\nAçık sipariş satırı bulunamadı.${lastNote}`);
       } else {
         // Sipariş başlığına göre grupla
         const byOrder = {};
@@ -1194,7 +1228,8 @@ function formatResultsLocal(_question, queries, results) {
     } else {
       // OData generic
       if (!data.length) {
-        sec.push(`📭 *${r.description}*\nKayıt bulunamadı.`);
+        const lastNote = r.lastDate ? `\n📅 Son kayıt: *${fmtDate(r.lastDate)}* tarihinde kesildi.` : '';
+        sec.push(`📭 *${r.description}*\nKayıt bulunamadı.${lastNote}`);
       } else {
         sec.push(`📋 *${r.description}* (${r.count} kayıt)\n`);
         let totalDoc = 0;

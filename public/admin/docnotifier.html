@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Belge Bildirimi – SAP WA Bot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/admin/admin.css" rel="stylesheet">
+</head>
+<body>
+<div class="d-flex">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <i class="bi bi-robot sidebar-logo"></i>
+      <div>
+        <div class="sidebar-title">SAP WA Bot</div>
+        <div class="sidebar-sub">Yönetim Paneli</div>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin"              class="nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a href="/admin/users"        class="nav-link"><i class="bi bi-people"></i> Kullanıcılar</a>
+      <a href="/admin/templates"    class="nav-link"><i class="bi bi-chat-square-text"></i> Şablonlar</a>
+      <a href="/admin/tasks"        class="nav-link"><i class="bi bi-clock-history"></i> Zamanlanmış Görevler</a>
+      <a href="/admin/docnotifier"  class="nav-link active"><i class="bi bi-bell"></i> Belge Bildirimi</a>
+      <a href="/admin/logs"         class="nav-link"><i class="bi bi-journal-text"></i> Mesaj Logları</a>
+      <a href="/admin/settings"     class="nav-link"><i class="bi bi-gear"></i> Ayarlar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" style="color:rgba(255,100,100,.7);text-decoration:none;font-size:.8rem">
+        <i class="bi bi-box-arrow-right me-1"></i>Çıkış Yap
+      </a>
+    </div>
+  </div>
+
+  <!-- İçerik -->
+  <div id="content">
+    <div class="content-header">
+      <h4 class="mb-0"><i class="bi bi-bell me-2"></i>Belge Bildirim Servisi</h4>
+      <small class="text-muted">Yeni fatura ve irsaliyeler için otomatik WhatsApp bildirimi (her 3 dakikada kontrol)</small>
+    </div>
+
+    <div class="container-fluid px-4 py-3">
+
+      <!-- Durum kartı -->
+      <div class="row mb-3">
+        <div class="col-12">
+          <div id="statusCard" class="alert alert-secondary d-flex align-items-center gap-2 mb-0">
+            <div class="spinner-border spinner-border-sm" role="status"></div>
+            <span>Yükleniyor...</span>
+          </div>
+        </div>
+      </div>
+
+      <form id="mainForm">
+        <div class="row g-3">
+
+          <!-- Sol: Aktif + Şablonlar -->
+          <div class="col-lg-7">
+            <div class="card">
+              <div class="card-header fw-semibold"><i class="bi bi-sliders me-2"></i>Genel Ayarlar</div>
+              <div class="card-body">
+
+                <!-- Aktif/Pasif -->
+                <div class="d-flex align-items-center justify-content-between mb-4 pb-3 border-bottom">
+                  <div>
+                    <div class="fw-semibold">Bildirimleri Etkinleştir</div>
+                    <small class="text-muted">Açık olduğunda her 3 dk yeni belge kontrol edilir ve müşteriye WhatsApp gönderilir.</small>
+                  </div>
+                  <div class="form-check form-switch ms-3">
+                    <input class="form-check-input" type="checkbox" id="chkEnabled" style="width:2.5rem;height:1.3rem;">
+                  </div>
+                </div>
+
+                <!-- Şablonlar -->
+                <h6 class="fw-semibold mb-3">WhatsApp Şablon Adları</h6>
+                <p class="text-muted small mb-3">
+                  Meta'da onaylı şablonların tam adını girin. Şablon boş bırakılırsa o belge türü için bildirim gönderilmez.<br>
+                  Şablon parametreleri: <code>{{1}}</code> Müşteri adı &nbsp;·&nbsp; <code>{{2}}</code> Belge no &nbsp;·&nbsp; <code>{{3}}</code> Tutar &nbsp;·&nbsp; <code>{{4}}</code> Görüntüleme linki
+                </p>
+
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">
+                    <i class="bi bi-receipt text-primary me-1"></i>E-Fatura Şablonu
+                  </label>
+                  <input type="text" class="form-control font-monospace" id="tplEfatura"
+                    placeholder="ör: musteri_efatura_bildirimi">
+                  <div class="form-text">OINV — Profile ≠ 5 (TEMELFATURA, TİCARİFATURA…)</div>
+                </div>
+
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">
+                    <i class="bi bi-file-earmark-text text-warning me-1"></i>E-Arşiv Fatura Şablonu
+                  </label>
+                  <input type="text" class="form-control font-monospace" id="tplEarsiv"
+                    placeholder="ör: musteri_earsiv_bildirimi">
+                  <div class="form-text">OINV — Profile = 5 (EARSIVFATURA)</div>
+                </div>
+
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">
+                    <i class="bi bi-truck text-success me-1"></i>İrsaliye Şablonu
+                  </label>
+                  <input type="text" class="form-control font-monospace" id="tplIrsaliye"
+                    placeholder="ör: musteri_irsaliye_bildirimi">
+                  <div class="form-text">ODLN — Sevk irsaliyeleri</div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- Sağ: Hariç tutulan numaralar + Son çalışma -->
+          <div class="col-lg-5">
+            <div class="card mb-3">
+              <div class="card-header fw-semibold"><i class="bi bi-telephone-x me-2"></i>Hariç Tutulan Numaralar</div>
+              <div class="card-body">
+                <p class="text-muted small mb-2">Bu telefon numaralarına bildirim gönderilmez (her satıra bir numara).</p>
+                <textarea class="form-control font-monospace" id="excludedPhones" rows="6"
+                  placeholder="905321234567&#10;905009876543"></textarea>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header fw-semibold"><i class="bi bi-info-circle me-2"></i>Son Çalışma</div>
+              <div class="card-body">
+                <table class="table table-sm mb-0">
+                  <tbody>
+                    <tr><td class="text-muted">Son çalışma</td><td id="infoLastRun">—</td></tr>
+                    <tr><td class="text-muted">Son fatura giriş</td><td id="infoLastInv">—</td></tr>
+                    <tr><td class="text-muted">Son irsaliye giriş</td><td id="infoLastDlv">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /row -->
+
+        <div class="d-flex gap-2 mt-3">
+          <button type="submit" class="btn btn-primary px-4">
+            <i class="bi bi-save me-1"></i>Kaydet
+          </button>
+          <button type="button" class="btn btn-outline-secondary" onclick="loadData()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+          </button>
+        </div>
+      </form>
+
+      <!-- E-Belge Görüntüleme URL'leri -->
+      <div class="row mt-4">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header fw-semibold"><i class="bi bi-file-earmark-text me-2"></i>E-Belge Görüntüleme URL'leri</div>
+            <div class="card-body">
+              <p class="text-muted small mb-3">
+                Entegratörünüzün görüntüleme bağlantılarını girin. <code>{0}</code> yerine belgedeki <strong>NumAtCard</strong> (fatura numarası) otomatik yerleştirilir.<br>
+                Örnek: <code>https://portal.example.com/doc/{0}.pdf</code>
+              </p>
+              <div class="row g-3">
+                <div class="col-12">
+                  <label class="form-label fw-semibold">E-Fatura Görüntüleme URL</label>
+                  <input type="text" class="form-control font-monospace" id="edocEfatura" placeholder="https://.../{0}.pdf">
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-semibold">E-Arşiv Görüntüleme URL</label>
+                  <input type="text" class="form-control font-monospace" id="edocEarsiv" placeholder="https://.../{0}.pdf">
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-semibold">E-İrsaliye Görüntüleme URL</label>
+                  <input type="text" class="form-control font-monospace" id="edocEirsaliye" placeholder="https://.../{0}.pdf">
+                </div>
+                <div class="col-12">
+                  <button type="button" class="btn btn-primary px-4" onclick="saveEdocSettings()">
+                    <i class="bi bi-save me-1"></i>URL'leri Kaydet
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /container -->
+  </div><!-- /content -->
+</div>
+
+<div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index:9999"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+async function loadData() {
+  try {
+    const r    = await fetch('/admin/api/doc-notifier');
+    const data = await r.json();
+
+    document.getElementById('chkEnabled').checked         = !!data.enabled;
+    document.getElementById('tplEfatura').value           = data.templates?.efatura  || '';
+    document.getElementById('tplEarsiv').value            = data.templates?.earsiv   || '';
+    document.getElementById('tplIrsaliye').value          = data.templates?.irsaliye || '';
+    document.getElementById('excludedPhones').value       = (data.excludedPhones || []).join('\n');
+    document.getElementById('infoLastRun').textContent    = data.lastRun        ? new Date(data.lastRun).toLocaleString('tr-TR') : '—';
+    document.getElementById('infoLastInv').textContent    = data.lastInvoiceEntry  != null ? `DocEntry ${data.lastInvoiceEntry}`  : '—';
+    document.getElementById('infoLastDlv').textContent    = data.lastDeliveryEntry != null ? `DocEntry ${data.lastDeliveryEntry}` : '—';
+
+    const card = document.getElementById('statusCard');
+    if (data.enabled) {
+      card.className = 'alert alert-success d-flex align-items-center gap-2 mb-0';
+      card.innerHTML = '<i class="bi bi-check-circle-fill fs-5"></i><span><strong>Aktif</strong> — Her 3 dakikada yeni belgeler kontrol ediliyor.</span>';
+    } else {
+      card.className = 'alert alert-warning d-flex align-items-center gap-2 mb-0';
+      card.innerHTML = '<i class="bi bi-pause-circle-fill fs-5"></i><span><strong>Pasif</strong> — Otomatik bildirim devre dışı.</span>';
+    }
+  } catch(e) {
+    showToast('Veriler yüklenemedi: ' + e.message, 'danger');
+  }
+}
+
+document.getElementById('mainForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('[type=submit]');
+  btn.disabled = true;
+  try {
+    const body = {
+      enabled: document.getElementById('chkEnabled').checked,
+      templates: {
+        efatura:  document.getElementById('tplEfatura').value.trim(),
+        earsiv:   document.getElementById('tplEarsiv').value.trim(),
+        irsaliye: document.getElementById('tplIrsaliye').value.trim(),
+      },
+      excludedPhonesText: document.getElementById('excludedPhones').value,
+    };
+    const r = await fetch('/admin/api/doc-notifier', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Ayarlar kaydedildi.', 'success');
+    await loadData();
+  } catch(e) {
+    showToast('Kayıt hatası: ' + e.message, 'danger');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function showToast(msg, type = 'info') {
+  const id = 'toast-' + Date.now();
+  document.getElementById('toast-container').insertAdjacentHTML('beforeend', `
+    <div id="${id}" class="toast align-items-center text-bg-${type} border-0 show" role="alert">
+      <div class="d-flex">
+        <div class="toast-body">${msg}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>`);
+  setTimeout(() => document.getElementById(id)?.remove(), 4000);
+}
+
+async function loadEdocSettings() {
+  try {
+    const res  = await fetch('/admin/api/edoc-settings');
+    const data = await res.json();
+    document.getElementById('edocEfatura').value   = data.efatura   || '';
+    document.getElementById('edocEarsiv').value    = data.earsiv    || '';
+    document.getElementById('edocEirsaliye').value = data.eirsaliye || '';
+  } catch { /* yoksay */ }
+}
+
+async function saveEdocSettings() {
+  const body = {
+    efatura:   document.getElementById('edocEfatura').value.trim(),
+    earsiv:    document.getElementById('edocEarsiv').value.trim(),
+    eirsaliye: document.getElementById('edocEirsaliye').value.trim(),
+  };
+  try {
+    const res  = await fetch('/admin/api/edoc-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showToast('E-Belge URL\'leri kaydedildi.', 'success');
+  } catch(e) {
+    showToast('Kayıt hatası: ' + e.message, 'danger');
+  }
+}
+
+loadData();
+loadEdocSettings();
+</script>
+</body>
+</html>

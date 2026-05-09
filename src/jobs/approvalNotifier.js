@@ -19,7 +19,6 @@ const path = require('path');
 
 const { getOnayBekleyenler } = require('../modules/sapDb');
 const { sendButtons } = require('../services/whatsappService');
-const { readApprovers } = require('../admin/approverService');
 const config = require('../config/config');
 
 const DATA_DIR   = path.join(__dirname, '../../data');
@@ -71,48 +70,33 @@ async function sendApprovalNotification(phone, row) {
 // ─── Ana kontrol ─────────────────────────────────────────────
 async function checkOnaylar() {
   try {
-    const rows      = await getOnayBekleyenler({ dbName: config.sapDb.database || undefined });
-    const approvers = readApprovers().filter(a => a.phone);
-    const state     = loadState();
-
-    if (approvers.length === 0) {
-      console.warn('[ApprovalNotifier] Kayıtlı yetkili yok → Admin panelinden ekleyin');
-      return;
-    }
+    const rows  = await getOnayBekleyenler({ dbName: config.sapDb.database || undefined });
+    const state = loadState();
 
     const newState = {};
     let sent = 0;
 
     for (const row of rows) {
-      // Her belge+onaylayan çifti için ayrı state key (aynı belge farklı kişilere gidebilir)
       const key = `${row.WddCode}_${row.OnaylayanKod}`;
       newState[key] = { docNum: row.DocNum, belgeTipi: row.BelgeTipi, notifiedAt: state[key]?.notifiedAt || null };
 
       if (state[key]?.notifiedAt) continue;
 
-      // SAP'taki onaylayıcı telefonunun son 10 hanesi
-      const sapPhone10 = normPhone(row.OnaylayanTelefon);
-
-      if (!sapPhone10) {
+      // OUSR.PortNum → uluslararası formata çevir (90XXXXXXXXXX)
+      const raw10 = normPhone(row.OnaylayanTelefon);
+      if (!raw10) {
         console.warn(`[ApprovalNotifier] OUSR.PortNum boş: ${row.OnaylayanKod} (${row.OnaylayanAd})`);
         continue;
       }
-
-      // Bot approvers listesinde son 10 hane eşleşen kaydı bul
-      const matched = approvers.find(a => normPhone(a.phone) === sapPhone10);
-
-      if (!matched) {
-        console.warn(`[ApprovalNotifier] Eşleşen kayıt yok: ${row.OnaylayanKod} (SAP tel son10: ${sapPhone10})`);
-        continue;
-      }
+      const phone = raw10.startsWith('90') ? raw10 : '90' + raw10;
 
       try {
-        await sendApprovalNotification(matched.phone, row);
+        await sendApprovalNotification(phone, row);
         newState[key].notifiedAt = new Date().toISOString();
-        console.log(`[ApprovalNotifier] ✓ ${row.BelgeTipi} #${row.DocNum} → ${matched.phone} (${matched.name} / ${row.OnaylayanKod})`);
+        console.log(`[ApprovalNotifier] ✓ ${row.BelgeTipi} #${row.DocNum} → ${phone} (${row.OnaylayanAd} / ${row.OnaylayanKod})`);
         sent++;
       } catch (err) {
-        console.error(`[ApprovalNotifier] ✗ Gönderim hatası (${matched.phone}):`, err.message);
+        console.error(`[ApprovalNotifier] ✗ Gönderim hatası (${phone}):`, err.message);
       }
     }
 

@@ -367,9 +367,7 @@ async function getServisGuncellemeleri({ dbName } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Onay Yetkilileri — WST1 + OUSR
-//
-// SAP'ta tanımlı onay şablonlarındaki tüm kullanıcıları döndürür.
+// Onay Yetkilileri — WST1 + OUSR (şablon tablosundan)
 // ─────────────────────────────────────────────────────────────
 async function getOnayYetkilileri({ dbName } = {}) {
   return await execute(`
@@ -382,6 +380,31 @@ async function getOnayYetkilileri({ dbName } = {}) {
     INNER JOIN OUSR u WITH(NOLOCK) ON w.UserID = u.USERID
     WHERE ISNULL(u.PortNum, '') <> ''
   `, {}, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Telefon → aktif WDD1 onay yetkisi kontrolü
+//
+// wddCode verilirse o belge için, verilmezse herhangi bir
+// bekleyen onay için kontrol yapar.
+// Döndürür: { UserKod, Ad } veya null
+// ─────────────────────────────────────────────────────────────
+async function getOnaylayanByPhone(phone10, wddCode, dbName) {
+  const docFilter = wddCode ? 'AND w.WddCode = @wddCode' : '';
+  const rows = await execute(`
+    SELECT TOP 1
+      u.USERID AS UserKod,
+      ISNULL(u.U_Name, u.USERID) AS Ad
+    FROM WDD1 w WITH(NOLOCK)
+    INNER JOIN OWDD d WITH(NOLOCK) ON d.WddCode = w.WddCode
+    INNER JOIN OUSR u WITH(NOLOCK) ON u.USERID  = w.UserID
+    WHERE d.Status = 'W'
+      AND w.Status = 'W'
+      ${docFilter}
+      AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            ISNULL(u.PortNum,''),' ',''),'-',''),'+',''),'(',''),')',''), 10) = @phone10
+  `, { phone10, wddCode: wddCode || null }, dbName);
+  return rows[0] || null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -894,6 +917,24 @@ async function getIrsaliyeSatir({ cardCode, itemCode, docDate, top = 50, dbName 
 }
 
 // ─────────────────────────────────────────────────────────────
+// Belirtilen tablodaki en son belge tarihini döndürür
+// tableName: OINV, ODLN, ORDR, OPOR, OPCH, ORIN, OITW …
+// Sonuç boş sorgularda "son kayıt: X tarihinde kesildi" bilgisi için kullanılır
+// ─────────────────────────────────────────────────────────────
+async function getLastDocDate({ tableName, cardCode, dbName } = {}) {
+  const where = cardCode ? "WHERE h.CardCode = @cardCode" : '';
+  const rows  = await execute(
+    `SELECT TOP 1 CONVERT(VARCHAR(10), h.DocDate, 23) AS LastDate
+     FROM ${tableName} h WITH(NOLOCK)
+     ${where}
+     ORDER BY h.DocDate DESC`,
+    { cardCode: cardCode || null },
+    dbName
+  );
+  return rows[0]?.LastDate || null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Ham SQL sorgusu çalıştır (sadece SELECT — admin zamanlanmış görevler için)
 // ─────────────────────────────────────────────────────────────
 async function runRawQuery(queryText, dbName) {
@@ -904,4 +945,47 @@ async function runRawQuery(queryText, dbName) {
   return await execute(queryText, {}, dbName);
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getUserByPhone, getCustomerByPhone, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, runRawQuery };
+// ─────────────────────────────────────────────────────────────
+// OHEM: Çalışan ana verisinden telefon ile arama
+// Mobile veya Tel1 alanının son 10 hanesiyle eşleştirir
+// ─────────────────────────────────────────────────────────────
+async function getEmployeeByPhone(phone10, dbName) {
+  const rows = await execute(`
+    SELECT TOP 1
+      e.empID                                                AS EmpId,
+      LTRIM(RTRIM(ISNULL(e.firstName,''))) + ' ' +
+      LTRIM(RTRIM(ISNULL(e.lastName,'')))                    AS FullName,
+      ISNULL(e.userId, '')                                   AS UserCode
+    FROM OHEM e WITH(NOLOCK)
+    WHERE e.Active = 'Y'
+      AND (
+        RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.mobil,''),' ',''),'-',''),'+',''),'(',''), 10) = @phone10
+        OR
+        RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.phone1,''),' ',''),'-',''),'+',''),'(',''), 10) = @phone10
+      )
+  `, { phone10 }, dbName);
+  return rows[0] || null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// OHEM: Tüm aktif çalışanları listele (admin panel için)
+// ─────────────────────────────────────────────────────────────
+async function getAllOhemEmployees({ dbName } = {}) {
+  return await execute(`
+    SELECT
+      e.empID                                  AS EmpId,
+      ISNULL(e.Code,  '')                      AS Code,
+      ISNULL(e.firstName,  '')                 AS FirstName,
+      ISNULL(e.middleName, '')                 AS MiddleName,
+      ISNULL(e.lastName,   '')                 AS LastName,
+      ISNULL(e.jobTitle,   '')                 AS JobTitle,
+      RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+        ISNULL(e.mobile,''),' ',''),'-',''),'+',''),'(',''),')',''), 10) AS Mobile,
+      ISNULL(e.userId, '')                     AS UserCode
+    FROM OHEM e WITH(NOLOCK)
+    WHERE e.Active = 'Y'
+    ORDER BY e.lastName, e.firstName
+  `, {}, dbName);
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate, runRawQuery };

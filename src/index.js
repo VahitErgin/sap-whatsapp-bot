@@ -10,6 +10,7 @@ const serviceNotifier  = require('./jobs/serviceNotifier');
 const approvalNotifier = require('./jobs/approvalNotifier');
 const taskService      = require('./services/taskService');
 const docNotifier      = require('./jobs/docNotifier');
+const licenseWatcher   = require('./jobs/licenseWatcher');
 const { logMessage }  = require('./services/messageLogger');
 const { transcribeVoice } = require('./services/voiceHandler');
 const { sendText }    = require('./services/whatsappService');
@@ -207,4 +208,5 @@ app.listen(config.port, () => {
   approvalNotifier.start();
   taskService.start();
   docNotifier.start();
+  licenseWatcher.start();
 });

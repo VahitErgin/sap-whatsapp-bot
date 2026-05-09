@@ -274,4 +274,14 @@ function reinit() {
   _init();
 }
 
-module.exports = { getConnection, reinit, SLConnection };
+// Manager session cookie'sini döndürür (OHEM çalışan otomatik oturum için)
+// sl._cookie = "B1SESSION=xxx" → sadece değeri döndür
+async function getManagerB1Session(dbName) {
+  const sl = getConnection(dbName);
+  await sl._ensureSession();
+  if (!sl._cookie) return null;
+  const match = sl._cookie.match(/B1SESSION=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+module.exports = { getConnection, reinit, SLConnection, getManagerB1Session };

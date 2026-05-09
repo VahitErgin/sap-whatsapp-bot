@@ -31,6 +31,10 @@ const PENDING_TTL        = 5 * 60 * 1000;
 const _pendingAttachment = new Map();
 const ATTACH_TTL         = 5 * 60 * 1000;
 
+// ── Mevcut aktiviteye dosya ekleme — aktivite kodu bekleniyor ─
+const _attachToCode   = new Map();
+const ATTACH_CODE_TTL = 3 * 60 * 1000;
+
 // Aktivite tipi listesi (Activity enum)
 const ALL_TYPES = [
   { id: 'ACT_TYPE:Meeting',    label: 'Toplantı',  desc: 'Yüz yüze / online görüşme' },
@@ -225,17 +229,27 @@ async function skipLocation(from) {
 // handleMediaAttachment — image/document mesajı geldiğinde çağrılır
 // ─────────────────────────────────────────────────────────────
 async function handleMediaAttachment(from, mediaId, mimeType, fileName) {
-  const pending = _pendingAttachment.get(_norm(from));
-  if (!pending || pending.expiresAt < Date.now()) {
-    _pendingAttachment.delete(_norm(from));
+  const key     = _norm(from);
+  const pending = _pendingAttachment.get(key);
+
+  if (!pending) {
+    console.log(`[CRM] Dosya ekleme atlandı → pending yok (${from})`);
     return false;
   }
+  if (pending.expiresAt < Date.now()) {
+    _pendingAttachment.delete(key);
+    console.log(`[CRM] Dosya ekleme atlandı → TTL doldu (${from})`);
+    return false;
+  }
+
+  console.log(`[CRM] Dosya ekleme başladı → docEntry:${pending.docEntry} db:${pending.dbName} dosya:${fileName}`);
 
   const maxMb = parseInt(process.env.ATTACHMENT_MAX_MB || '5', 10);
 
   try {
     await sendText(from, '⏳ Dosya indiriliyor...');
     const { buffer, fileSize } = await downloadMedia(mediaId);
+    console.log(`[CRM] Dosya indirildi → ${fileSize} byte, mime:${mimeType}`);
 
     if (fileSize && fileSize > maxMb * 1024 * 1024) {
       await sendText(from,
@@ -249,13 +263,18 @@ async function handleMediaAttachment(from, mediaId, mimeType, fileName) {
     await sendText(from, '⏳ SAP\'a yükleniyor...');
     const sl       = getConnection(pending.dbName || config.sap.companyDb);
     const uploaded = await sl.postForm('Attachments2', buffer, fileName, mimeType);
+    console.log(`[CRM] Attachments2 yanıtı:`, JSON.stringify(uploaded).substring(0, 300));
+
     const absEntry = uploaded?.AbsEntry;
+    if (!absEntry && absEntry !== 0) {
+      throw new Error(`SAP'tan AbsEntry alınamadı. Yanıt: ${JSON.stringify(uploaded).substring(0, 200)}`);
+    }
 
-    if (!absEntry) throw new Error('SAP\'tan AbsEntry alınamadı');
+    console.log(`[CRM] Attachment yüklendi → AbsEntry:${absEntry}, aktivite:${pending.docEntry} güncelleniyor...`);
+    const patchResult = await sl.patch('Activities', pending.docEntry, { AttachmentEntry: absEntry });
+    console.log(`[CRM] Activities patch sonucu:`, JSON.stringify(patchResult));
 
-    await sl.patch('Activities', pending.docEntry, { AttachmentEntry: absEntry });
-
-    _pendingAttachment.delete(_norm(from));
+    _pendingAttachment.delete(key);
     await sendText(from, `✅ *Dosya eklendi!*\n📎 ${fileName}`);
 
   } catch (err) {
@@ -268,6 +287,59 @@ async function handleMediaAttachment(from, mediaId, mimeType, fileName) {
 
 function cancelAttachment(from) {
   _pendingAttachment.delete(_norm(from));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mevcut aktiviteye dosya ekleme (wizard dışı)
+// ─────────────────────────────────────────────────────────────
+async function handleAttachToExisting({ from, text, dbName }) {
+  const numMatch = text.match(/\d+/);
+  if (numMatch) {
+    await _setAttachPendingByCode(from, parseInt(numMatch[0], 10), dbName);
+    return;
+  }
+  _attachToCode.set(_norm(from), { dbName, expiresAt: Date.now() + ATTACH_CODE_TTL });
+  await sendText(from,
+    '📎 Hangi aktiviteye dosya eklemek istiyorsunuz?\n' +
+    'Aktivite kodunu yazın: _(örnek: 134)_'
+  );
+}
+
+async function handleAttachCodeInput(from, text) {
+  const state = _attachToCode.get(_norm(from));
+  if (!state || state.expiresAt < Date.now()) {
+    _attachToCode.delete(_norm(from));
+    return false;
+  }
+  const numMatch = text.match(/\d+/);
+  if (!numMatch) {
+    await sendText(from, '⚠️ Geçerli bir aktivite kodu girin. _(örnek: 134)_');
+    return true;
+  }
+  _attachToCode.delete(_norm(from));
+  await _setAttachPendingByCode(from, parseInt(numMatch[0], 10), state.dbName);
+  return true;
+}
+
+function getAttachCodeState(from) {
+  const k = _norm(from);
+  const e = _attachToCode.get(k);
+  if (!e) return null;
+  if (e.expiresAt < Date.now()) { _attachToCode.delete(k); return null; }
+  return e;
+}
+
+async function _setAttachPendingByCode(from, activityCode, dbName) {
+  _pendingAttachment.set(_norm(from), {
+    docEntry:  activityCode,
+    dbName:    dbName || config.sap.companyDb,
+    expiresAt: Date.now() + ATTACH_TTL,
+  });
+  await sendText(from,
+    `📎 *Aktivite #${activityCode}* için dosya bekleniyor.\n` +
+    'Dosyanızı veya fotoğrafınızı gönderin.\n' +
+    '_(PDF, Word, Excel, görsel desteklenir — 5 dk içinde gönderilmeli)_'
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -847,6 +919,10 @@ module.exports = {
   getActivityTypes,
   getActivitySubjects,
   cancelActivityWizard,
+  // Mevcut aktiviteye dosya ekleme
+  handleAttachToExisting,
+  handleAttachCodeInput,
+  getAttachCodeState,
   // Lead wizard
   handleCreateLead,
   handleLeadWizardInput,

@@ -5,7 +5,6 @@ const path     = require('path');
 const fs       = require('fs');
 const config   = require('../config/config');
 const { requireAuth }                      = require('./authMiddleware');
-const { readApprovers, addApprover, removeApprover } = require('./approverService');
 const { listTemplates, createTemplate, deleteTemplate } = require('./templateService');
 const { getConnection, reinit: reinitSap }  = require('../modules/sapClient');
 const { readEnv, updateEnv }               = require('./configService');
@@ -17,6 +16,8 @@ const { testConnection: graphTestConnection } = require('../services/graphServic
 const { getStats, addUser, updateUser, removeUser } = require('../services/userRegistry');
 const { getLicenseInfo, importLicense, getFingerprint } = require('../services/licenseService');
 const { loadState: loadDocNotifState, saveState: saveDocNotifState } = require('../jobs/docNotifier');
+const ohemService = require('../services/ohemService');
+const { getAllOhemEmployees } = require('../modules/sapDb');
 
 const router  = express.Router();
 const viewDir = path.join(__dirname, '../../public/admin');
@@ -59,11 +60,11 @@ router.get('/logout', (req, res) => {
 });
 
 router.get('/',          requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'dashboard.html')));
-router.get('/approvers', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'approvers.html')));
-router.get('/templates', requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'templates.html')));
-router.get('/settings',  requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'settings.html')));
-router.get('/logs',      requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'logs.html')));
-router.get('/tasks',     requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'tasks.html')));
+router.get('/templates',    requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'templates.html')));
+router.get('/settings',     requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'settings.html')));
+router.get('/logs',         requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'logs.html')));
+router.get('/tasks',        requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'tasks.html')));
+router.get('/docnotifier',  requireAuth, (req, res) => res.sendFile(path.join(viewDir, 'docnotifier.html')));
 
 // ─────────────────────────────────────────────────────────────
 // Kimlik Doğrulama
@@ -105,7 +106,7 @@ router.get('/api/status', requireAuth, async (req, res) => {
     server:        'ok',
     sap:           sapStatus,
     sapDetail,
-    approverCount: readApprovers().length,
+
     nodeVersion:   process.version,
     uptime:        Math.floor(process.uptime()),
     companyDb:     config.sap.companyDb,
@@ -128,30 +129,6 @@ router.post('/api/test-sap', requireAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// API – Onay Yetkilileri
-// ─────────────────────────────────────────────────────────────
-
-router.get('/api/approvers', requireAuth, (req, res) => {
-  res.json(readApprovers());
-});
-
-router.post('/api/approvers', requireAuth, (req, res) => {
-  const { phone, name } = req.body || {};
-  if (!phone || !name) return res.status(400).json({ error: 'Telefon ve isim zorunlu' });
-  if (!/^\d{10,15}$/.test(phone)) {
-    return res.status(400).json({ error: 'Geçersiz telefon (ülke kodu dahil, + olmadan, 10-15 hane)' });
-  }
-  try {
-    res.json(addApprover(phone.trim(), name.trim()));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-router.delete('/api/approvers/:phone', requireAuth, (req, res) => {
-  res.json(removeApprover(req.params.phone));
-});
 
 // ─────────────────────────────────────────────────────────────
 // API – WhatsApp Şablonları
@@ -224,6 +201,11 @@ router.get('/api/settings', requireAuth, (req, res) => {
     NOTIF_MODE:              env.NOTIF_MODE                 || 'live',
     NOTIF_TEST_PHONE:        env.NOTIF_TEST_PHONE           || '',
     MAX_USERS:               env.MAX_USERS                  || '',
+    // OHEM Çalışan Erişimi
+    OHEM_ENABLED:            env.OHEM_ENABLED               || 'false',
+    OHEM_DEFAULT_LICENSE:    env.OHEM_DEFAULT_LICENSE        || 'Professional',
+    // Lisans Uyarı Telefonu
+    LICENSE_NOTIF_PHONE:     env.LICENSE_NOTIF_PHONE         || '',
     // Admin
     ADMIN_USERNAME:          getAdminCfg().username        || 'admin',
   });
@@ -238,6 +220,8 @@ router.post('/api/settings', requireAuth, (req, res) => {
     'SESSION_TIMEOUT_MINUTES', 'CRM_ACTIVE_TYPES', 'CRM_ACTIVE_SUBJECTS', 'ATTACHMENT_MAX_MB',
     'SERVIS_NOTIF_TEMPLATE', 'STOCK_PRICE_LIST',
     'NOTIF_MODE', 'NOTIF_TEST_PHONE',
+    'OHEM_ENABLED', 'OHEM_DEFAULT_LICENSE',
+    'LICENSE_NOTIF_PHONE',
   ];
   const sensitiveKeys = new Set(['WA_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'SAP_PASSWORD', 'SAP_DB_PASSWORD']);
   const updates = {};
@@ -274,6 +258,9 @@ router.post('/api/settings', requireAuth, (req, res) => {
   if (updates.ATTACHMENT_MAX_MB !== undefined)   process.env.ATTACHMENT_MAX_MB   = updates.ATTACHMENT_MAX_MB;
   if (updates.SERVIS_NOTIF_TEMPLATE !== undefined) process.env.SERVIS_NOTIF_TEMPLATE = updates.SERVIS_NOTIF_TEMPLATE;
   if (updates.STOCK_PRICE_LIST !== undefined)      process.env.STOCK_PRICE_LIST      = updates.STOCK_PRICE_LIST;
+  if (updates.OHEM_ENABLED !== undefined)          process.env.OHEM_ENABLED          = updates.OHEM_ENABLED;
+  if (updates.OHEM_DEFAULT_LICENSE !== undefined)  process.env.OHEM_DEFAULT_LICENSE  = updates.OHEM_DEFAULT_LICENSE;
+  if (updates.LICENSE_NOTIF_PHONE !== undefined)   process.env.LICENSE_NOTIF_PHONE   = updates.LICENSE_NOTIF_PHONE;
 
   // SAP bağlantı bilgileri değiştiyse connection pool'u yenile
   const sapChanged = ['SAP_SERVICE_LAYER_URL','SAP_COMPANY_DB','SAP_DATABASES','SAP_USERNAME','SAP_PASSWORD'].some(k => k in updates);
@@ -397,6 +384,54 @@ router.post('/api/license', requireAuth, (req, res) => {
     res.json({ ok: true, payload });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – OHEM Çalışan Erişimi
+// ─────────────────────────────────────────────────────────────
+router.get('/api/ohem', requireAuth, (_req, res) => {
+  res.json(ohemService.loadSettings());
+});
+
+router.post('/api/ohem', requireAuth, (req, res) => {
+  const current = ohemService.loadSettings();
+  const { enabled, users } = req.body || {};
+  const next = {
+    enabled: enabled !== undefined ? !!enabled : current.enabled,
+    users:   Array.isArray(users)  ? users     : current.users,
+  };
+  ohemService.saveSettings(next);
+  process.env.OHEM_ENABLED = String(next.enabled);
+  res.json({ ok: true });
+});
+
+// SAP OHEM tablosundan tüm aktif çalışanları çek + kayıtlı ayarlarla birleştir
+router.get('/api/ohem/sap-employees', requireAuth, async (_req, res) => {
+  try {
+    const employees = await getAllOhemEmployees();
+    const { users: saved = [] } = ohemService.loadSettings();
+
+    const result = employees.map(e => {
+      const phone    = String(e.Mobile || '').replace(/\D/g, '').slice(-10);
+      const nameParts = [e.FirstName, e.MiddleName, e.LastName].filter(Boolean);
+      const fullName  = nameParts.join(' ').trim();
+      const existing  = saved.find(u => String(u.phone || '').replace(/\D/g, '').slice(-10) === phone);
+      return {
+        empId:    e.EmpId,
+        code:     e.Code     || '',
+        name:     fullName   || e.Code || String(e.EmpId),
+        jobTitle: e.JobTitle || '',
+        phone,
+        userCode: e.UserCode || null,
+        license:  existing?.license || 'Professional',
+        enabled:  existing ? (existing.enabled !== false) : false,
+        saved:    !!existing,
+      };
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
