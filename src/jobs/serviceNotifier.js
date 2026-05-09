@@ -96,8 +96,8 @@ async function checkServisChanges() {
     for (const n of toNotify) {
       try {
         await sendTemplate(n.telefon, TEMPLATE_NAME, 'tr', [
-          { type: 'text', text: String(n.key)             },   // {{1}} Çağrı No
-          { type: 'text', text: n.durum || 'Güncellendi'  },   // {{2}} Yeni Durum
+          { type: 'text', parameter_name: 'customer_name', text: String(n.key)            },
+          { type: 'text', parameter_name: 'status',        text: n.durum || 'Güncellendi' },
         ]);
         console.log(`[Notifier] ✓ Çağrı ${n.key} → ${n.telefon} | ${n.durum}`);
       } catch (err) {

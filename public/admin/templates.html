@@ -229,9 +229,17 @@ async function loadTemplates() {
       const st   = t.status || 'PENDING';
       const cat  = t.category || '—';
       const lang = t.language || '—';
+      const body = (t.components || []).find(c => c.type === 'BODY');
+      const bodyText = body ? body.text : null;
+      const idx  = data.indexOf(t);
       return `
         <tr>
-          <td><strong>${t.name}</strong></td>
+          <td>
+            <strong>${t.name}</strong>
+            ${bodyText ? `<button class="btn btn-link btn-sm p-0 ms-2 text-muted" style="font-size:.75rem" onclick="toggleBody(${idx})" title="Gövdeyi göster">
+              <i class="bi bi-eye"></i>
+            </button>` : ''}
+          </td>
           <td><span class="badge badge-status ${CAT_STYLE[cat] || 'bg-secondary'}">${cat}</span></td>
           <td><code style="font-size:.8rem">${lang}</code></td>
           <td><span class="badge badge-status ${STATUS_STYLE[st] || 'bg-secondary'}">${STATUS_LABEL[st] || st}</span></td>
@@ -240,7 +248,12 @@ async function loadTemplates() {
               <i class="bi bi-trash"></i>
             </button>
           </td>
-        </tr>`;
+        </tr>
+        ${bodyText ? `<tr id="bodyRow_${idx}" class="d-none bg-light">
+          <td colspan="5" class="py-2 px-4">
+            <code style="font-size:.8rem;white-space:pre-wrap">${bodyText.replace(/</g,'&lt;')}</code>
+          </td>
+        </tr>` : ''}`;
     }).join('');
 
   } catch {
@@ -308,6 +321,11 @@ document.getElementById('confirmDelBtn').addEventListener('click', async () => {
   pendingDelName = null;
   loadTemplates();
 });
+
+function toggleBody(idx) {
+  const row = document.getElementById('bodyRow_' + idx);
+  if (row) row.classList.toggle('d-none');
+}
 
 async function checkStatus() {
   const btn = document.getElementById('checkBtn');
