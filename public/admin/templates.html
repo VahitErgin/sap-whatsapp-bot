@@ -54,9 +54,10 @@
       <div class="card-header d-flex align-items-center justify-content-between">
         <span><i class="bi bi-list-ul me-2"></i>Kayıtlı Şablonlar</span>
         <div class="d-flex gap-2 align-items-center">
+          <small class="text-muted" id="statusSummary"></small>
           <small class="text-muted" id="countBadge"></small>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadTemplates()">
-            <i class="bi bi-arrow-clockwise"></i>
+          <button class="btn btn-sm btn-outline-primary" id="checkBtn" onclick="checkStatus()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Onay Durumunu Kontrol Et
           </button>
         </div>
       </div>
@@ -204,6 +205,16 @@ async function loadTemplates() {
 
     document.getElementById('countBadge').textContent = `${data.length} şablon`;
 
+    // Onay durumu özeti
+    const counts = { APPROVED: 0, PENDING: 0, REJECTED: 0, PAUSED: 0 };
+    data.forEach(t => { const k = t.status || 'PENDING'; counts[k] = (counts[k] || 0) + 1; });
+    const parts = [];
+    if (counts.APPROVED) parts.push(`<span class="text-success fw-semibold">✓ ${counts.APPROVED} onaylı</span>`);
+    if (counts.PENDING)  parts.push(`<span class="text-warning fw-semibold">⏳ ${counts.PENDING} beklemede</span>`);
+    if (counts.REJECTED) parts.push(`<span class="text-danger fw-semibold">✗ ${counts.REJECTED} reddedildi</span>`);
+    if (counts.PAUSED)   parts.push(`<span class="text-secondary fw-semibold">⏸ ${counts.PAUSED} durduruldu</span>`);
+    document.getElementById('statusSummary').innerHTML = parts.join(' · ');
+
     if (data.length === 0) {
       document.getElementById('tableBody').innerHTML = `
         <tr><td colspan="5">
@@ -297,6 +308,15 @@ document.getElementById('confirmDelBtn').addEventListener('click', async () => {
   pendingDelName = null;
   loadTemplates();
 });
+
+async function checkStatus() {
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Kontrol ediliyor...';
+  await loadTemplates();
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Onay Durumunu Kontrol Et';
+}
 
 loadTemplates();
 </script>
