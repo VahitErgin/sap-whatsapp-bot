@@ -1027,18 +1027,27 @@ async function searchItems({ query, itemType = 'sales', top = 10, dbName }) {
     Q2: `%${upperTR(query)}%`,
     Top: Number(top),
   };
+  // Stok filtresi: envanter kalemi değilse (hizmet) stok şartı aranmaz;
+  // envanter kalemiyse en az bir depoda OnHand > 0 olmalı.
   return await execute(`
     SELECT TOP (@Top)
       i.ItemCode,
       ISNULL(i.ItemName,    '') AS ItemName,
       ISNULL(i.ManSerNum,   'N') AS ManSerNum,
-      ISNULL(i.ManBatchNum, 'N') AS ManBatchNum,
+      ISNULL(i.ManBtchNum,  'N') AS ManBatchNum,
       ISNULL(i.InvntryUom,  'Adet') AS InvntryUom
     FROM OITM i WITH(NOLOCK)
     WHERE (i.ItemCode LIKE @Q1 OR i.ItemName LIKE @Q1 OR i.ItemName LIKE @Q2)
       ${typeFilter}
-      AND i.Canceled  = 'N'
-      AND i.validFor  = 'Y'
+      AND i.Canceled = 'N'
+      AND i.validFor = 'Y'
+      AND (
+        i.InvntItem = 'N'
+        OR EXISTS (
+          SELECT 1 FROM OITW w WITH(NOLOCK)
+          WHERE w.ItemCode = i.ItemCode AND w.OnHand > 0
+        )
+      )
     ORDER BY i.ItemCode
   `, params, dbName);
 }
