@@ -56,6 +56,14 @@ const {
   cancelDocWizard,
 } = require('../modules/salesDocWizard');
 
+const {
+  hasUpdWizard,
+  cancelUpdWizard,
+  startUpdateWizard,
+  handleUpdButton,
+  handleUpdText,
+} = require('../modules/activityUpdater');
+
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
 function getModules() {
@@ -221,14 +229,26 @@ async function handleIncoming({ from, text }) {
       return await handleDocButton(from, text, user);
     }
 
+    // ── 3c. Aktivite güncelleme butonları (ACT_UPD / ACT_STAT) ─
+    if (
+      text.startsWith('ACT_UPD:') ||
+      text.startsWith('ACT_STAT:') ||
+      text === 'ACT_NOTE_SKIP' ||
+      text === 'ACT_UPD_CANCEL'
+    ) {
+      const session = getSession(from);
+      return await handleUpdButton(from, text, user, session);
+    }
+
     // ── 4. Wizard modu ───────────────────────────────────────
     // Herhangi bir adımda "iptal / vazgeç / cancel" → wizard'ı temizle
-    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from) || getAttachCodeState(from) || hasDocWizard(from) || hasDocPending(from);
+    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from) || getAttachCodeState(from) || hasDocWizard(from) || hasDocPending(from) || hasUpdWizard(from);
     if (_inWizard && /^(iptal|vazgeç|vazgec|cancel|çıkış|cikis|dur|kapat)$/i.test(upper)) {
       cancelLeadWizard(from);
       cancelActivityWizard(from);
       cancelServiceWizard(from);
       cancelDocWizard(from);
+      cancelUpdWizard(from);
       return await sendText(from, '🚫 İşlem iptal edildi.');
     }
 
@@ -237,6 +257,7 @@ async function handleIncoming({ from, text }) {
     if (getWizardState(from))        return await handleWizardInput(from, text);
     if (getServiceWizardState(from)) return await handleServiceWizardInput(from, text);
     if (hasDocWizard(from) || hasDocPending(from)) return await handleDocText(from, text, user);
+    if (hasUpdWizard(from)) { const session = getSession(from); return await handleUpdText(from, text, session); }
 
     // ── 5. Intent belirle (keyword → Claude Haiku fallback) ──
     const intent = await detectIntentLocal(text);
@@ -326,6 +347,17 @@ async function handleIncoming({ from, text }) {
         return await startDocWizard(from, { ...user, employeeId: session.employeeId, b1session: session.b1session });
       }
 
+      case 'crm_update': {
+        const session = getSession(from);
+        if (!session) {
+          return await sendText(from,
+            '🔐 *Aktivite güncellemek için giriş yapmanız gerekiyor.*\n\n' +
+            'SAP B1 hesabınızla giriş yapmak için *giriş yap* yazın.'
+          );
+        }
+        return await startUpdateWizard(from, user, session);
+      }
+
       case 'lang':
         return await sendButtons(from,
           t(user.lang, 'lang_select'),
@@ -394,6 +426,15 @@ function _keywordIntent(text) {
   )
     return { intent: 'lead', confidence: 0.95, reason: 'keyword' };
 
+  // CRM güncelleme: aktivite durum değiştirme
+  if (
+    /aktivite\s*(güncelle|guncelle|durumu|tamamla|kapat|değiştir)/.test(t) ||
+    /görev\s*(güncelle|guncelle|durumu|tamamla|kapat)/.test(t) ||
+    /(aktivite|görev)\s+durumu/.test(t) ||
+    t === 'aktivite güncelle' || t === 'görev güncelle'
+  )
+    return { intent: 'crm_update', confidence: 0.95, reason: 'keyword' };
+
   // CRM: açık oluşturma fiilleri veya 1. şahıs geçmiş zaman
   if (
     /aktivite\s+(oluştur|ekle|yaz|kaydet|gir|aç|başlat)/.test(t) ||
@@ -459,6 +500,7 @@ MODÜLLER:
 - "cashflow"     → SAP veri sorgulama: bakiye, fatura, stok, sipariş, ödeme, tahsilat, rapor, aktivite/fırsat GÖRÜNTÜLEME
 - "approval"     → Satın alma siparişi ONAYLAMA veya REDDETME
 - "crm"          → Aktivite/toplantı/görüşme KAYDETME veya OLUŞTURMA (geçmişte olan)
+- "crm_update"   → Mevcut aktivitenin DURUMUNU güncelleme (başlatıldı, tamamlandı vb.) veya not ekleme
 - "attach_file"  → Mevcut aktiviteye dosya/resim/belge EKLEME (dosya ekle, resim ekle, ek dosya)
 - "lead"         → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
 - "service_call" → Servis çağrısı / arıza bildirimi / teknik destek talebi OLUŞTURMA
@@ -466,7 +508,7 @@ MODÜLLER:
 - "support"      → SAP hata mesajları, nasıl yapılır soruları, teknik destek
 - "help"         → Yardım menüsü
 
-KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
+KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aktivite DURUM/NOT güncelleme → crm_update | Aday müşteri ekleme → lead
 KRİTİK: Bekleyen/açık servis GÖRME/LISTELEME → cashflow | Servis çağrısı OLUŞTURMA/AÇMA → service_call
 KRİTİK: Dosya/resim/belge ekleme → attach_file
 KRİTİK: Sipariş/fatura/irsaliye/teklif OLUŞTURMA → sales_doc | Bunların GÖRÜNTÜLENMESI → cashflow
