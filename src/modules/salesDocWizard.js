@@ -39,6 +39,7 @@ const DOC_TYPES = [
   { id: 'Orders',           label: 'Satış Siparişi',      icon: '📦', isBuy: false },
   { id: 'Invoices',         label: 'Satış Faturası',      icon: '🧾', isBuy: false },
   { id: 'DeliveryNotes',    label: 'Müşteri İrsaliyesi',  icon: '🚚', isBuy: false },
+  { id: 'CreditNotes',      label: 'İade Talebi',         icon: '↩️', isBuy: false },
   { id: 'PurchaseOrders',   label: 'Alım Siparişi',       icon: '🛒', isBuy: true  },
   { id: 'PurchaseInvoices', label: 'Alım Faturası',       icon: '📑', isBuy: true  },
 ];
@@ -150,7 +151,7 @@ async function handleDocButton(phone, btnId, user) {
 }
 
 // ─── Metin girişi ───────────────────────────────────────────────────
-async function handleDocText(phone, text, user) {
+async function handleDocText(phone, text, _user) {
   const k     = _norm(phone);
   const state = _wizard.get(k);
   if (!state || state.expiresAt < Date.now()) { _wizard.delete(k); return false; }
@@ -389,7 +390,7 @@ async function _afterPrice(phone, k, state) {
 }
 
 // ── 6a. Seri numarası toplama ────────────────────────────────────────
-async function _askNextSerial(phone, k, state) {
+async function _askNextSerial(phone, _k, state) {
   const ci        = state.currentItem;
   const collected = ci.serials.length;
   const needed    = Math.round(ci.qty);
@@ -410,7 +411,6 @@ async function _askNextSerial(phone, k, state) {
   const body   = `*${ci.itemName}* seri numarası seçin veya yazın:`;
 
   if (rows.length > 0) {
-    const extraRow = collected < needed - 1 ? [] : [];
     await sendList(phone, header, body, 'Seç',
       [{ title: 'Mevcut Seriler', rows }]
     );
@@ -448,7 +448,7 @@ async function _onSerialDone(phone, k, state) {
 }
 
 // ── 6b. Parti toplama ────────────────────────────────────────────────
-async function _askNextBatch(phone, k, state) {
+async function _askNextBatch(phone, _k, state) {
   const ci        = state.currentItem;
   const remaining = ci.batchRemaining;
 
@@ -576,7 +576,7 @@ async function _onSummary(phone, k, state) {
 }
 
 // ── 9. SAP'a kaydet ──────────────────────────────────────────────────
-async function _onSave(phone, k, state, user) {
+async function _onSave(phone, k, _state, _user) {
   const pnd = _pending.get(k);
   if (!pnd) {
     await sendText(phone, '⚠️ Oturum süresi dolmuş. Lütfen baştan başlayın.');
