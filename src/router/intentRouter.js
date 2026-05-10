@@ -47,6 +47,15 @@ const {
   cancelServiceWizard,
 } = require('../modules/serviceCallWizard');
 
+const {
+  hasWizard:    hasDocWizard,
+  hasPending:   hasDocPending,
+  startDocWizard,
+  handleDocButton,
+  handleDocText,
+  cancelDocWizard,
+} = require('../modules/salesDocWizard');
+
 // Modüller lazy-load → döngüsel bağımlılık riski yok
 let cashflow, approval, support;
 function getModules() {
@@ -207,13 +216,19 @@ async function handleIncoming({ from, text }) {
       return await handleWizardTimeSelection(from, text.replace('ACT_TIME:', '').trim());
     }
 
+    // ── 3b. Pazarlama belgesi butonları (DOC_*) ──────────────
+    if (text.startsWith('DOC_') && (hasDocWizard(from) || hasDocPending(from))) {
+      return await handleDocButton(from, text, user);
+    }
+
     // ── 4. Wizard modu ───────────────────────────────────────
     // Herhangi bir adımda "iptal / vazgeç / cancel" → wizard'ı temizle
-    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from) || getAttachCodeState(from);
+    const _inWizard = getLeadWizardState(from) || getWizardState(from) || getServiceWizardState(from) || getAttachCodeState(from) || hasDocWizard(from) || hasDocPending(from);
     if (_inWizard && /^(iptal|vazgeç|vazgec|cancel|çıkış|cikis|dur|kapat)$/i.test(upper)) {
       cancelLeadWizard(from);
       cancelActivityWizard(from);
       cancelServiceWizard(from);
+      cancelDocWizard(from);
       return await sendText(from, '🚫 İşlem iptal edildi.');
     }
 
@@ -221,6 +236,7 @@ async function handleIncoming({ from, text }) {
     if (getLeadWizardState(from))    return await handleLeadWizardInput(from, text);
     if (getWizardState(from))        return await handleWizardInput(from, text);
     if (getServiceWizardState(from)) return await handleServiceWizardInput(from, text);
+    if (hasDocWizard(from) || hasDocPending(from)) return await handleDocText(from, text, user);
 
     // ── 5. Intent belirle (keyword → Claude Haiku fallback) ──
     const intent = await detectIntentLocal(text);
@@ -297,6 +313,17 @@ async function handleIncoming({ from, text }) {
           return await sendText(from, t(user.lang, 'login_required'));
         }
         return await handleCreateServiceCall({ from, session, dbName: user.dbName });
+      }
+
+      case 'sales_doc': {
+        const session = getSession(from);
+        if (!session) {
+          return await sendText(from,
+            '🔐 *Belge oluşturmak için giriş yapmanız gerekiyor.*\n\n' +
+            'SAP B1 hesabınızla giriş yapmak için *giriş yap* yazın.'
+          );
+        }
+        return await startDocWizard(from, { ...user, employeeId: session.employeeId, b1session: session.b1session });
       }
 
       case 'lang':
@@ -405,6 +432,18 @@ function _keywordIntent(text) {
   )
     return { intent: 'service_call', confidence: 0.95, reason: 'keyword' };
 
+  // Pazarlama belgesi oluşturma
+  if (
+    /satış\s+(teklifi?|siparişi?|faturası?|irsaliyesi?)\s*(oluştur|ekle|aç|yaz|kes)?/.test(t) ||
+    /alım\s+(siparişi?|faturası?)\s*(oluştur|ekle|aç)?/.test(t) ||
+    /(sipariş|fatura|irsaliye|teklif)\s*(oluştur|kes|aç|yaz|ekle|gir)/.test(t) ||
+    /yeni\s+(sipariş|fatura|irsaliye|teklif|belge)/.test(t) ||
+    /belge\s*(oluştur|aç|ekle|yaz)/.test(t) ||
+    /pazarlama\s*belgesi/.test(t) ||
+    t === 'sipariş' || t === 'fatura kes' || t === 'irsaliye' || t === 'teklif ver'
+  )
+    return { intent: 'sales_doc', confidence: 0.95, reason: 'keyword' };
+
   // SAP hata kodları
   if (/-\d+ (hatası|kodu)/.test(t) || t.includes('dönem kapalı'))
     return { intent: 'support', confidence: 0.92, reason: 'keyword' };
@@ -423,12 +462,14 @@ MODÜLLER:
 - "attach_file"  → Mevcut aktiviteye dosya/resim/belge EKLEME (dosya ekle, resim ekle, ek dosya)
 - "lead"         → Yeni aday müşteri / lead / potansiyel müşteri EKLEME veya TANIMLAMA
 - "service_call" → Servis çağrısı / arıza bildirimi / teknik destek talebi OLUŞTURMA
+- "sales_doc"    → Satış/alım belgesi OLUŞTURMA: teklif, sipariş, fatura, irsaliye, alım siparişi, alım faturası
 - "support"      → SAP hata mesajları, nasıl yapılır soruları, teknik destek
 - "help"         → Yardım menüsü
 
 KRİTİK: Aktivite/toplantı GÖRME → cashflow | Aktivite OLUŞTURMA → crm | Aday müşteri ekleme → lead
 KRİTİK: Bekleyen/açık servis GÖRME/LISTELEME → cashflow | Servis çağrısı OLUŞTURMA/AÇMA → service_call
 KRİTİK: Dosya/resim/belge ekleme → attach_file
+KRİTİK: Sipariş/fatura/irsaliye/teklif OLUŞTURMA → sales_doc | Bunların GÖRÜNTÜLENMESI → cashflow
 
 YANIT (sadece JSON):
 {"intent":"cashflow","confidence":0.9,"reason":"kısa açıklama"}`;

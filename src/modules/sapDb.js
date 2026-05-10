@@ -988,4 +988,122 @@ async function getAllOhemEmployees({ dbName } = {}) {
   `, {}, dbName);
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate, runRawQuery };
+// ─────────────────────────────────────────────────────────────
+// Cari arama — salesDocWizard için (CardType filtreli)
+// cardType: 'C' = müşteri, 'S' = tedarikçi
+// ─────────────────────────────────────────────────────────────
+async function searchPartners({ query, cardType = 'C', top = 10, dbName }) {
+  const params = {
+    Name1: `%${query}%`,
+    Name2: `%${upperTR(query)}%`,
+    Name3: `%${query.toUpperCase()}%`,
+    CardType: cardType,
+    Top: Number(top),
+  };
+  const records = await execute(`
+    SELECT TOP (@Top)
+      CardCode,
+      ISNULL(CardName, '') AS CardName,
+      ISNULL(Currency, '') AS Currency
+    FROM OCRD WITH(NOLOCK)
+    WHERE (CardCode LIKE @Name1 OR CardName LIKE @Name1 OR CardName LIKE @Name2 OR CardName LIKE @Name3)
+      AND CardType  = @CardType
+      AND frozenFor = 'N'
+    ORDER BY CardName
+  `, params, dbName);
+  if (records.length === 0) return { found: 'none' };
+  if (records.length === 1) return { found: 'one', record: records[0] };
+  return { found: 'many', records };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Ürün arama — kod veya ad LIKE (seri/parti bilgisiyle)
+// itemType: 'sales' (SellItem) | 'purchase' (PrchseItem)
+// ─────────────────────────────────────────────────────────────
+async function searchItems({ query, itemType = 'sales', top = 10, dbName }) {
+  const typeFilter = itemType === 'purchase' ? "AND i.PrchseItem = 'Y'" : "AND i.SellItem = 'Y'";
+  const params = {
+    Q1: `%${query}%`,
+    Q2: `%${upperTR(query)}%`,
+    Top: Number(top),
+  };
+  return await execute(`
+    SELECT TOP (@Top)
+      i.ItemCode,
+      ISNULL(i.ItemName,    '') AS ItemName,
+      ISNULL(i.ManSerNum,   'N') AS ManSerNum,
+      ISNULL(i.ManBatchNum, 'N') AS ManBatchNum,
+      ISNULL(i.InvntryUom,  'Adet') AS InvntryUom
+    FROM OITM i WITH(NOLOCK)
+    WHERE (i.ItemCode LIKE @Q1 OR i.ItemName LIKE @Q1 OR i.ItemName LIKE @Q2)
+      ${typeFilter}
+      AND i.Canceled  = 'N'
+      AND i.validFor  = 'Y'
+    ORDER BY i.ItemCode
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Cari bilgisi — fiyat listesi ve para birimi (OCRD)
+// ─────────────────────────────────────────────────────────────
+async function getPartnerInfo({ cardCode, dbName }) {
+  const rows = await execute(`
+    SELECT TOP 1
+      CardCode,
+      ISNULL(CardName, '') AS CardName,
+      ISNULL(ListNum,  1)  AS ListNum,
+      ISNULL(Currency, '') AS Currency
+    FROM OCRD WITH(NOLOCK)
+    WHERE CardCode = @CardCode
+  `, { CardCode: cardCode }, dbName);
+  return rows[0] || null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Fiyat listesinden ürün fiyatı — ITM1
+// ─────────────────────────────────────────────────────────────
+async function getItemPrice({ itemCode, priceList = 1, dbName }) {
+  const rows = await execute(`
+    SELECT TOP 1
+      ISNULL(Price,    0)   AS Price,
+      ISNULL(Currency, '')  AS Currency
+    FROM ITM1 WITH(NOLOCK)
+    WHERE ItemCode  = @ItemCode
+      AND PriceList = @PriceList
+  `, { ItemCode: itemCode, PriceList: Number(priceList) }, dbName);
+  return rows[0] || null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mevcut seri numaraları — OSRN (Status=0 → depoda)
+// ─────────────────────────────────────────────────────────────
+async function getAvailableSerials({ itemCode, top = 10, dbName }) {
+  return await execute(`
+    SELECT TOP (@Top)
+      SysNumber,
+      ISNULL(DistNumber, '') AS DistNumber
+    FROM OSRN WITH(NOLOCK)
+    WHERE ItemCode = @ItemCode
+      AND Status   = 0
+    ORDER BY SysNumber DESC
+  `, { ItemCode: itemCode, Top: Number(top) }, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mevcut parti numaraları — OBTN (Status=0 → depoda)
+// ─────────────────────────────────────────────────────────────
+async function getAvailableBatches({ itemCode, top = 10, dbName }) {
+  return await execute(`
+    SELECT TOP (@Top)
+      ISNULL(DistNumber, '') AS DistNumber,
+      ISNULL(Quantity,   0)  AS Quantity,
+      CONVERT(VARCHAR(10), ExpDate, 23) AS ExpDate
+    FROM OBTN WITH(NOLOCK)
+    WHERE ItemCode = @ItemCode
+      AND Status   = 0
+      AND ISNULL(Quantity, 0) > 0
+    ORDER BY ExpDate ASC, DistNumber
+  `, { ItemCode: itemCode, Top: Number(top) }, dbName);
+}
+
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches };
