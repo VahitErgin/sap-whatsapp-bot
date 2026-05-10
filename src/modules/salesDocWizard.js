@@ -34,15 +34,15 @@ function _norm(phone) {
 }
 
 // ─── Belge tipi kataloğu ────────────────────────────────────────────
-// draftCode → SAP B1 SL Drafts endpoint'inde DocObjectCode alanına gider
+// draftCode → SAP B1 SL /Drafts endpoint'inde DocObjectCode (BoObjectTypes enum, plural)
 const DOC_TYPES = [
-  { id: 'Quotations',       label: 'Satış Teklifi',       icon: '📋', isBuy: false, draftCode: 'oQuotation'       },
-  { id: 'Orders',           label: 'Satış Siparişi',      icon: '📦', isBuy: false, draftCode: 'oOrder'           },
-  { id: 'Invoices',         label: 'Satış Faturası',      icon: '🧾', isBuy: false, draftCode: 'oInvoice'         },
-  { id: 'DeliveryNotes',    label: 'Müşteri İrsaliyesi',  icon: '🚚', isBuy: false, draftCode: 'oDeliveryNote'    },
-  { id: 'CreditNotes',      label: 'İade Talebi',         icon: '↩️', isBuy: false, draftCode: 'oCreditNote'      },
-  { id: 'PurchaseOrders',   label: 'Alım Siparişi',       icon: '🛒', isBuy: true,  draftCode: 'oPurchaseOrder'   },
-  { id: 'PurchaseInvoices', label: 'Alım Faturası',       icon: '📑', isBuy: true,  draftCode: 'oPurchaseInvoice' },
+  { id: 'Quotations',       label: 'Satış Teklifi',       icon: '📋', isBuy: false, draftCode: 'oQuotations'       },
+  { id: 'Orders',           label: 'Satış Siparişi',      icon: '📦', isBuy: false, draftCode: 'oOrders'           },
+  { id: 'Invoices',         label: 'Satış Faturası',      icon: '🧾', isBuy: false, draftCode: 'oInvoices'         },
+  { id: 'DeliveryNotes',    label: 'Müşteri İrsaliyesi',  icon: '🚚', isBuy: false, draftCode: 'oDeliveryNotes'    },
+  { id: 'CreditNotes',      label: 'İade Talebi',         icon: '↩️', isBuy: false, draftCode: 'oCreditNotes'      },
+  { id: 'PurchaseOrders',   label: 'Alım Siparişi',       icon: '🛒', isBuy: true,  draftCode: 'oPurchaseOrders'   },
+  { id: 'PurchaseInvoices', label: 'Alım Faturası',       icon: '📑', isBuy: true,  draftCode: 'oPurchaseInvoices' },
 ];
 
 // ─── Yardımcılar ────────────────────────────────────────────────────
@@ -590,20 +590,12 @@ async function _onSave(phone, k, _state, _user) {
     const sl    = getConnection(pnd.dbName || config.sap.companyDb);
     const today = new Date().toISOString().slice(0, 10);
 
-    const documentLines = pnd.items.map(it => {
-      const line = {
-        ItemCode:  it.itemCode,
-        Quantity:  it.qty,
-        UnitPrice: it.unitPrice,
-      };
-      if (it.isSerial && it.serials.length > 0) {
-        line.SerialNumbers = it.serials.map(s => ({ InternalSerialNumber: s.sn }));
-      }
-      if (it.isBatch && it.batches.length > 0) {
-        line.BatchNumbers = it.batches.map(b => ({ BatchNumber: b.batchNo, Quantity: b.qty }));
-      }
-      return line;
-    });
+    // Taslakta seri/parti ataması yapılmaz — finalize sırasında SAP'ta girilir
+    const documentLines = pnd.items.map(it => ({
+      ItemCode:  it.itemCode,
+      Quantity:  it.qty,
+      UnitPrice: it.unitPrice,
+    }));
 
     const payload = {
       DocObjectCode: pnd.draftCode,   // Drafts endpoint: hangi belge tipi
