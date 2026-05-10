@@ -34,14 +34,15 @@ function _norm(phone) {
 }
 
 // ─── Belge tipi kataloğu ────────────────────────────────────────────
+// draftCode → SAP B1 SL Drafts endpoint'inde DocObjectCode alanına gider
 const DOC_TYPES = [
-  { id: 'Quotations',       label: 'Satış Teklifi',       icon: '📋', isBuy: false },
-  { id: 'Orders',           label: 'Satış Siparişi',      icon: '📦', isBuy: false },
-  { id: 'Invoices',         label: 'Satış Faturası',      icon: '🧾', isBuy: false },
-  { id: 'DeliveryNotes',    label: 'Müşteri İrsaliyesi',  icon: '🚚', isBuy: false },
-  { id: 'CreditNotes',      label: 'İade Talebi',         icon: '↩️', isBuy: false },
-  { id: 'PurchaseOrders',   label: 'Alım Siparişi',       icon: '🛒', isBuy: true  },
-  { id: 'PurchaseInvoices', label: 'Alım Faturası',       icon: '📑', isBuy: true  },
+  { id: 'Quotations',       label: 'Satış Teklifi',       icon: '📋', isBuy: false, draftCode: 'oQuotation'       },
+  { id: 'Orders',           label: 'Satış Siparişi',      icon: '📦', isBuy: false, draftCode: 'oOrder'           },
+  { id: 'Invoices',         label: 'Satış Faturası',      icon: '🧾', isBuy: false, draftCode: 'oInvoice'         },
+  { id: 'DeliveryNotes',    label: 'Müşteri İrsaliyesi',  icon: '🚚', isBuy: false, draftCode: 'oDeliveryNote'    },
+  { id: 'CreditNotes',      label: 'İade Talebi',         icon: '↩️', isBuy: false, draftCode: 'oCreditNote'      },
+  { id: 'PurchaseOrders',   label: 'Alım Siparişi',       icon: '🛒', isBuy: true,  draftCode: 'oPurchaseOrder'   },
+  { id: 'PurchaseInvoices', label: 'Alım Faturası',       icon: '📑', isBuy: true,  draftCode: 'oPurchaseInvoice' },
 ];
 
 // ─── Yardımcılar ────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ async function _onDocType(phone, k, state, typeId) {
   const dt = DOC_TYPES.find(d => d.id === typeId);
   if (!dt) return false;
 
-  Object.assign(state, { docTypeId: dt.id, docTypeLabel: dt.label, docTypeIcon: dt.icon, isBuy: dt.isBuy, step: 'partner' });
+  Object.assign(state, { docTypeId: dt.id, draftCode: dt.draftCode, docTypeLabel: dt.label, docTypeIcon: dt.icon, isBuy: dt.isBuy, step: 'partner' });
   _wizard.set(k, state);
 
   const pLabel = dt.isBuy ? 'Tedarikçi' : 'Müşteri';
@@ -583,7 +584,7 @@ async function _onSave(phone, k, _state, _user) {
     return true;
   }
 
-  await sendText(phone, '⏳ Belge oluşturuluyor...');
+  await sendText(phone, '⏳ Taslak kaydediliyor...');
 
   try {
     const sl    = getConnection(pnd.dbName || config.sap.companyDb);
@@ -605,27 +606,29 @@ async function _onSave(phone, k, _state, _user) {
     });
 
     const payload = {
+      DocObjectCode: pnd.draftCode,   // Drafts endpoint: hangi belge tipi
       CardCode:      pnd.cardCode,
       DocDate:       today,
       DocDueDate:    today,
       DocumentLines: documentLines,
     };
-    // Satış temsilcisi (eğer session'da employeeId varsa)
     const session = pnd.user;
     if (session?.employeeId) payload.SalesPersonCode = session.employeeId;
 
-    const result = await sl.post(pnd.docTypeId, payload);
-    const docNum = result.DocNum || result.DocEntry || '?';
+    // Tüm belgeler taslak olarak kaydedilir — SAP'ta yetkili onaylayıp finalize eder
+    const result  = await sl.post('Drafts', payload);
+    const docEntry = result.DocEntry || '?';
 
     _pending.delete(k);
 
     const tot = pnd.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
     await sendText(phone,
-      `✅ *${pnd.docTypeLabel}* oluşturuldu!\n\n` +
-      `📄 Belge No: *${docNum}*\n` +
+      `✅ *${pnd.docTypeLabel}* taslak olarak kaydedildi!\n\n` +
+      `📋 Taslak No: *${docEntry}*\n` +
       `👤 ${pnd.cardName}\n` +
       `💰 Toplam: ${_fmtNum(tot)} ${pnd.currency}\n` +
-      `📅 ${new Date().toLocaleDateString('tr-TR')}`
+      `📅 ${new Date().toLocaleDateString('tr-TR')}\n\n` +
+      `_SAP B1'de Taslaklar menüsünden inceleyip onaylayabilirsiniz._`
     );
   } catch (err) {
     console.error('[DocWizard] Kayıt hatası:', err.message);
