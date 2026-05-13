@@ -85,15 +85,14 @@ async function handleUpdText(phone, text, session) {
 async function _showActivities(phone, k, user, session) {
   const sl = getConnection(user.dbName || config.sap.companyDb);
 
-  // Sadece açık aktiviteler; varsa employee bazlı filtre
-  let filter = "Closed eq 'tNO'";
+  // Sadece açık görev tipi aktiviteler; varsa employee bazlı filtre
+  let filter = "Closed eq 'tNO' and Activity eq 'cn_Task'";
   if (session?.employeeId) filter += ` and HandledBy eq ${session.employeeId}`;
 
   let acts = [];
   try {
     const res = await sl.get('Activities', {
       '$filter':  filter,
-      '$select':  'DocEntry,ActivityDate,CardCode,Notes,Activity,ActivityStatus',
       '$orderby': 'DocEntry desc',
       '$top':     '8',
     });
@@ -114,11 +113,18 @@ async function _showActivities(phone, k, user, session) {
   st.activities = acts;
   _state.set(k, st);
 
-  const rows = acts.map(a => ({
-    id:          `ACT_UPD:${a.DocEntry}`,
-    title:       `#${a.DocEntry} ${a.CardCode || '—'}`,
-    description: (a.Notes || '').slice(0, 72) || String(a.Activity || ''),
-  }));
+  // DocEntry yoksa ActivityCode'a düş (SAP SL bazı sürümlerde farklı key döner)
+  const seen = new Set();
+  const rows = acts
+    .map((a, i) => {
+      const key = a.DocEntry ?? a.ActivityCode ?? i;
+      return {
+        id:          `ACT_UPD:${key}`,
+        title:       `#${key} ${(a.CardCode || '—')}`.substring(0, 24),
+        description: (a.Notes || '').slice(0, 72),
+      };
+    })
+    .filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 
   await sendList(phone, '📋 Aktivite Güncelle',
     'Durumunu güncellemek istediğiniz aktiviteyi seçin:',
@@ -126,7 +132,7 @@ async function _showActivities(phone, k, user, session) {
   );
 }
 
-async function _onActSelect(phone, k, st, docEntry, session) {
+async function _onActSelect(phone, k, st, docEntry, _session) {
   st.docEntry    = docEntry;
   st.currentNotes = (st.activities || []).find(a => String(a.DocEntry) === String(docEntry))?.Notes || '';
   st.step = 'statSelect';
@@ -197,7 +203,7 @@ async function _doSave(phone, k, st, session) {
       currentNotes = live?.Notes ?? currentNotes;
     } catch { /* mevcut değeri kullan */ }
 
-    const patch = { ActivityStatus: st.newStatus };
+    const patch = { Status: st.newStatus };
 
     if (st.appendNote) {
       const ts   = new Date().toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });

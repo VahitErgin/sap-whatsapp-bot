@@ -1119,9 +1119,14 @@ async function getAvailableBatches({ itemCode, top = 10, dbName }) {
 // OCLA Aktivite Durumları — activityUpdater için
 // ─────────────────────────────────────────────────────────────
 async function getOclaStatuses({ dbName } = {}) {
-  return await execute(`
-    SELECT Code, Name FROM OCLA WITH(NOLOCK) ORDER BY Code
-  `, {}, dbName);
+  const rows = await execute(`SELECT * FROM OCLA WITH(NOLOCK)`, {}, dbName);
+  if (!rows.length) return [];
+  const sample = rows[0];
+  const keys   = Object.keys(sample);
+  // Kolon adları SAP versiyonuna göre değişir — otomatik tespit
+  const codeKey = keys.find(k => Number.isInteger(sample[k])) || keys[0];
+  const nameKey = keys.find(k => typeof sample[k] === 'string' && k !== codeKey) || keys[1];
+  return rows.map(r => ({ Code: r[codeKey], Name: r[nameKey] }));
 }
 
 module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches, getOclaStatuses };
