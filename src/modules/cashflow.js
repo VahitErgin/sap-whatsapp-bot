@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getGlHesap, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -110,6 +110,22 @@ Banka hesabı kapanış bakiyeleri (OBNK + JDT1):
   → Kullanım: "banka bakiyesi", "banka kapanış bakiyesi", "banka hesapları", "kasa/banka durumu",
               "yıl sonu banka", "hesap bakiyeleri"
   KRİTİK: ChartOfAccounts, FinancialStatements, BankPages gibi Service Layer endpoint KULLANMA.
+
+GL Hesap bakiye / dönem cirosu (OACT + JDT1):
+  endpoint: "SQL_GL_HESAP"
+  params: {
+    "acctPrefix": "102",          (ZORUNLU - GL kod öneki: "102", "600", "102.01", "320.01.001")
+    "startDate":  "YYYY-MM-DD",   (opsiyonel - dönem başlangıcı, ciro/dönem hareketi için)
+    "endDate":    "YYYY-MM-DD",   (opsiyonel - dönem sonu)
+    "refDate":    "YYYY-MM-DD"    (opsiyonel - startDate/endDate yoksa bu tarihe kadar bakiye)
+  }
+  Kural: startDate+endDate verirsen → dönem hareketi/ciro
+         sadece refDate (veya hiç) → o tarihe kadar bakiye
+  → Kullanım: "102 bankalar vadeli mevduat", "600 yurtiçi satış cirosu", "320 satıcılar bakiyesi",
+              "X hesap kodu", "X kodlu hesap bakiyesi", "Aralık 2025 600 ciro", "120 müşteriler"
+  KRİTİK: Türk muhasebe kodlu hesap sorgularında (1xx/2xx/3xx/4xx/5xx/6xx/7xx ile başlayan)
+          SQL_BANKA_BAKIYE veya başka bir endpoint kullanma — SADECE SQL_GL_HESAP kullan.
+          acctPrefix: kullanıcı "102" derse "102", "600.01" derse "600.01" gönder.
 
 Tahsilat listesi — gelen ödemeler (ORCT):
   endpoint: "SQL_TAHSILAT"
@@ -872,6 +888,16 @@ async function executeQueries(sl, queries, dbName) {
           dbName,
         });
         data = rows;
+      } else if (q.endpoint === 'SQL_GL_HESAP') {
+        // Direkt SQL: OACT + JDT1 (GL hesap bakiye / dönem cirosu)
+        const rows = await getGlHesap({
+          acctPrefix: q.params.acctPrefix || q.params.acctCode || null,
+          startDate:  q.params.startDate  || null,
+          endDate:    q.params.endDate    || null,
+          refDate:    q.params.refDate    || null,
+          dbName,
+        });
+        data = rows;
       } else {
         // Service Layer (OData)
         const method = (q.method || 'GET').toUpperCase();
@@ -1189,6 +1215,50 @@ function formatResultsLocal(_question, queries, results) {
           );
         });
         if (data.length > 8) sec.push(`_... ve ${data.length - 8} çağrı daha_`);
+      }
+
+    } else if (ep === 'SQL_GL_HESAP') {
+      const isCiro = !!(q.params?.startDate && q.params?.endDate);
+      if (!data.length) {
+        sec.push(`📭 *${r.description}*\nBu hesap için kayıt bulunamadı.`);
+      } else {
+        // Hesap bazında grupla (her hesabın TRY ve FC döviz satırları olabilir)
+        const byAcct = {};
+        data.forEach(row => {
+          const key = row.AcctCode;
+          if (!byAcct[key]) byAcct[key] = { AcctCode: row.AcctCode, FormatCode: row.FormatCode, HesapAdi: row.HesapAdi, satirlar: [], hareket: 0 };
+          byAcct[key].satirlar.push(row);
+          byAcct[key].hareket += Number(row.HareketSayisi) || 0;
+        });
+        const accts = Object.values(byAcct);
+
+        // Toplam (tüm hesaplar): TRY + para birimi bazlı FC
+        let totTRY = 0;
+        const totFC = {};
+        data.forEach(row => {
+          totTRY += Number(row.Bakiye) || 0;
+          const cur = row.Para;
+          if (cur && cur !== 'TRY' && Math.abs(Number(row.BakiyeFC) || 0) > 0.01) {
+            totFC[cur] = (totFC[cur] || 0) + Number(row.BakiyeFC);
+          }
+        });
+        const fcSummary = Object.entries(totFC).map(([cur, amt]) => fmtMoney(amt, cur)).join(' · ');
+
+        const title = isCiro
+          ? `📊 *${r.description}*\n📅 Dönem: ${fmtDate(q.params.startDate)} → ${fmtDate(q.params.endDate)}`
+          : `💼 *${r.description}*\n📅 Tarih: ${fmtDate(q.params.refDate || new Date().toISOString().split('T')[0])}`;
+        sec.push(title);
+        sec.push(`💰 ${isCiro ? 'Toplam ciro' : 'Bakiye'}: *${fmtMoney(totTRY)}*${fcSummary ? `  (FC: ${fcSummary})` : ''}`);
+        sec.push(`📁 ${accts.length} hesap · ${data.reduce((s, r2) => s + (Number(r2.HareketSayisi) || 0), 0)} hareket\n`);
+
+        accts.slice(0, 10).forEach(a => {
+          const trySatir = a.satirlar.find(s => s.Para === 'TRY');
+          const fcSatir  = a.satirlar.find(s => s.Para !== 'TRY' && Math.abs(Number(s.BakiyeFC) || 0) > 0.01);
+          const tryAmt   = trySatir ? fmtMoney(Number(trySatir.Bakiye) || 0) : fmtMoney(0);
+          const fcAmt    = fcSatir  ? `  (${fmtMoney(Number(fcSatir.BakiyeFC) || 0, fcSatir.Para)})` : '';
+          sec.push(`▸ *${a.FormatCode || a.AcctCode}* — ${String(a.HesapAdi).substring(0, 35)}\n   ${tryAmt}${fcAmt}`);
+        });
+        if (accts.length > 10) sec.push(`_... ve ${accts.length - 10} hesap daha_`);
       }
 
     } else if (ep === 'SQL_FATURA_SATIR') {

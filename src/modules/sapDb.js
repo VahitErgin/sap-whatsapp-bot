@@ -917,6 +917,52 @@ async function getIrsaliyeSatir({ cardCode, itemCode, docDate, top = 50, dbName 
 }
 
 // ─────────────────────────────────────────────────────────────
+// GL Hesap Bakiyesi / Dönem Hareketi — OACT + JDT1 + OJDT
+//
+// acctPrefix → hesap kod öneki, ör: '102', '600', '102.01' (zorunlu)
+// startDate  → dönem başlangıcı (verilirse + endDate → ciro/dönem hareketi)
+// endDate    → dönem sonu
+// refDate    → startDate/endDate yoksa: bu tarihe kadar bakiye (default: bugün)
+//
+// AcctCode hem 102, hem 102.01.001 formatına uyacak şekilde LIKE prefix.
+// ─────────────────────────────────────────────────────────────
+async function getGlHesap({ acctPrefix, startDate, endDate, refDate, dbName }) {
+  const params = { AcctPrefix: `${acctPrefix}%` };
+  let dateCondition = '';
+
+  if (startDate && endDate) {
+    params.StartDate = startDate;
+    params.EndDate   = endDate;
+    dateCondition    = 'AND jh.RefDate >= @StartDate AND jh.RefDate <= @EndDate';
+  } else {
+    params.RefDate = refDate || new Date().toISOString().split('T')[0];
+    dateCondition  = 'AND jh.RefDate <= @RefDate';
+  }
+
+  return await execute(`
+    SELECT
+      oa.AcctCode,
+      ISNULL(oa.FormatCode, oa.AcctCode)                       AS FormatCode,
+      oa.AcctName                                              AS HesapAdi,
+      ISNULL(j.FCCurrency, 'TRY')                              AS Para,
+      SUM(ISNULL(j.Debit,    0))                               AS ToplamBorc,
+      SUM(ISNULL(j.Credit,   0))                               AS ToplamAlacak,
+      SUM(ISNULL(j.Debit,    0)) - SUM(ISNULL(j.Credit,    0)) AS Bakiye,
+      SUM(ISNULL(j.FCDebit,  0))                               AS ToplamBorcFC,
+      SUM(ISNULL(j.FCCredit, 0))                               AS ToplamAlacakFC,
+      SUM(ISNULL(j.FCDebit,  0)) - SUM(ISNULL(j.FCCredit,  0)) AS BakiyeFC,
+      COUNT(*)                                                 AS HareketSayisi
+    FROM OACT oa WITH(NOLOCK)
+    INNER JOIN JDT1 j  WITH(NOLOCK) ON j.Account  = oa.AcctCode
+    INNER JOIN OJDT jh WITH(NOLOCK) ON jh.TransId = j.TransId
+    WHERE (oa.AcctCode LIKE @AcctPrefix OR ISNULL(oa.FormatCode, '') LIKE @AcctPrefix)
+      ${dateCondition}
+    GROUP BY oa.AcctCode, oa.FormatCode, oa.AcctName, j.FCCurrency
+    ORDER BY oa.AcctCode, Para
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Fatura Satır Detayı — OINV + INV1 (ürün/satır bazlı)
 //
 // docNum    → fatura numarası (opsiyonel — "72197 nolu fatura")
@@ -1185,4 +1231,4 @@ async function getOclaStatuses({ dbName } = {}) {
   return rows.map(r => ({ Code: r[codeKey], Name: r[nameKey] }));
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches, getOclaStatuses };
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getGlHesap, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches, getOclaStatuses };
