@@ -473,6 +473,21 @@ function _keywordIntent(text) {
   )
     return { intent: 'service_call', confidence: 0.95, reason: 'keyword' };
 
+  // Cashflow: ciro / toplam / rapor / sorgu — sales_doc'tan ÖNCE
+  // "Aralık 2025 yurtiçi satış faturalarının toplam cirosu" gibi soruları sales_doc'a düşürmez
+  if (
+    /\bcirosu?\b/.test(t) ||
+    /\btoplam\b.*(satış|fatura|ciro|gelir|tahsilat|ödeme|alacak|borç|stok)/.test(t) ||
+    /(satış|fatura|alım|sipariş|irsaliye|tahsilat|ödeme|stok|bakiye|ekstre).*\btoplam(ı)?\b/.test(t) ||
+    /(rapor|listele|listesi|görüntüle|göster|sorgula|nedir|kaç|ne kadar)\b.*?(fatura|sipariş|irsaliye|teklif|ciro|satış|alım|stok|bakiye|ödeme|tahsilat)/.test(t) ||
+    /(fatura|sipariş|irsaliye|teklif|stok|bakiye|ödeme|tahsilat).*?(rapor|listele|listesi|görüntüle|göster|sorgula|nedir|kaç|ne kadar)\b/.test(t) ||
+    /\b(yurtiçi|yurtdışı|ihracat)\s+sat/.test(t) ||
+    /\b\d{3}\s*(yurtiçi|yurtdışı|bankalar|satıcılar|alıcılar|müşteriler|kasa|mevduat|hesap|kodlu)/.test(t) ||
+    /\b\d+\s+nolu\s+(fatura|sipariş|irsaliye|teklif)/.test(t) ||
+    /\b(fatura|sipariş|irsaliye|teklif)\s+(detay|içeri[ğg]i|kalem|satır)/.test(t)
+  )
+    return { intent: 'cashflow', confidence: 0.93, reason: 'keyword-report' };
+
   // Pazarlama belgesi oluşturma
   if (
     /satış\s+(teklifi?|siparişi?|faturası?|irsaliyesi?)\s*(oluştur|ekle|aç|yaz|kes)?/.test(t) ||
