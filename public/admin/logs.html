@@ -186,10 +186,13 @@ function renderTable(rows) {
       ? '<span class="badge bg-success" style="font-size:.7rem">Gelen</span>'
       : '<span class="badge bg-warning text-dark" style="font-size:.7rem">Giden</span>';
 
+    // Kopyalanacak tam metin (her satır tipi için)
+    let fullText;
     let msgCell;
     if (r.type === 'location' && r.latitude && r.longitude) {
       const mapsUrl = `https://www.google.com/maps?q=${r.latitude},${r.longitude}`;
       const label   = r.name || `${r.latitude}, ${r.longitude}`;
+      fullText = `${label}${r.address ? ' — ' + r.address : ''} (${mapsUrl})`;
       msgCell = `<span class="badge bg-info text-dark me-1" style="font-size:.7rem">📍 Konum</span>
         <a href="${mapsUrl}" target="_blank" rel="noopener" style="font-size:.82rem">
           ${esc(label)}
@@ -197,9 +200,14 @@ function renderTable(rows) {
         </a>
         ${r.address ? `<span class="text-muted ms-1" style="font-size:.75rem">${esc(r.address)}</span>` : ''}`;
     } else {
-      const msg = isIn ? (r.text || '') : (r.preview || `[${r.type || ''}]`);
-      msgCell = `<span title="${esc(msg)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:480px">${esc(msg)}</span>`;
+      fullText = isIn ? (r.text || '') : (r.preview || `[${r.type || ''}]`);
+      msgCell = `<span title="Çift tıkla → kopyala" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:480px">${esc(fullText)}</span>`;
     }
+
+    tr.style.cursor = 'pointer';
+    tr.dataset.msg  = fullText;
+    tr.title        = 'Çift tıkla → mesajı panoya kopyala';
+    tr.addEventListener('dblclick', () => copyRowMsg(tr));
 
     tr.innerHTML = `
       <td class="text-muted">${fmtTs(r.ts)}</td>
@@ -250,6 +258,38 @@ function fmtTs(ts) {
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Çift tıkla mesajı panoya kopyala ──────────────────────────
+async function copyRowMsg(tr) {
+  const text = tr.dataset.msg || '';
+  if (!text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // HTTPS olmayan / eski tarayıcı fallback'i
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity  = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    flashRow(tr, '#d4edda'); // yeşil
+  } catch (err) {
+    console.error('Kopyalama hatası:', err);
+    flashRow(tr, '#f8d7da'); // kırmızı
+  }
+}
+
+function flashRow(tr, color) {
+  const orig = tr.style.backgroundColor;
+  tr.style.transition      = 'background-color .15s ease';
+  tr.style.backgroundColor = color;
+  setTimeout(() => { tr.style.backgroundColor = orig; }, 500);
 }
 </script>
 <script src="/admin/admin-i18n.js"></script>
