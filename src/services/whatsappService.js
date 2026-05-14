@@ -117,11 +117,11 @@ async function _send(to, messagePayload) {
 }
 
 function _preview(payload) {
-  if (payload.type === 'text') return (payload.text?.body || '').substring(0, 120);
+  if (payload.type === 'text') return (payload.text?.body || '').substring(0, 500);
   if (payload.type === 'interactive') {
     const h = payload.interactive?.header?.text || '';
     const b = payload.interactive?.body?.text   || '';
-    return `${h} | ${b}`.substring(0, 120);
+    return `${h} | ${b}`.substring(0, 500);
   }
   if (payload.type === 'template') return payload.template?.name || '';
   return '';

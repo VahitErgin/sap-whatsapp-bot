@@ -1202,18 +1202,33 @@ function formatResultsLocal(_question, queries, results) {
           if (!byInv[key]) {
             byInv[key] = {
               DocNum: row.DocNum, CardName: row.CardName, DocDate: row.DocDate,
-              DocDueDate: row.DocDueDate, DocTotal: row.DocTotal, DocCur: row.DocCur, lines: [],
+              DocDueDate: row.DocDueDate, DocTotal: row.DocTotal, DocTotalFC: row.DocTotalFC,
+              DocCur: row.DocCur, lines: [],
             };
           }
           byInv[key].lines.push(row);
         });
         const invs = Object.values(byInv);
-        sec.push(`🧾 *${r.description}* (${invs.length} fatura, ${data.length} satır)\n`);
+        // Toplam ciro (TRY + FC para birimi bazlı)
+        const sumTRY = invs.reduce((s, o) => s + (parseFloat(o.DocTotal) || 0), 0);
+        const sumFC  = {};
+        invs.forEach(o => {
+          if (o.DocCur && o.DocCur !== 'TRY' && parseFloat(o.DocTotalFC) > 0) {
+            sumFC[o.DocCur] = (sumFC[o.DocCur] || 0) + parseFloat(o.DocTotalFC);
+          }
+        });
+        const fcSummary = Object.entries(sumFC).map(([cur, amt]) => fmtMoney(amt, cur)).join(' · ');
+        sec.push(`🧾 *${r.description}* (${invs.length} fatura, ${data.length} satır)`);
+        sec.push(`💰 Toplam: *${fmtMoney(sumTRY)}*${fcSummary ? `  (FC: ${fcSummary})` : ''}\n`);
         invs.slice(0, 8).forEach(o => {
-          sec.push(`📋 *Fatura #${o.DocNum}* — *${o.CardName}*  📅 ${fmtDate(o.DocDate)}  💰 ${fmtMoney(o.DocTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+          const fcLabel = (o.DocCur && o.DocCur !== 'TRY' && parseFloat(o.DocTotalFC) > 0)
+            ? `  (${fmtMoney(o.DocTotalFC, o.DocCur)})` : '';
+          sec.push(`📋 *Fatura #${o.DocNum}* — *${o.CardName}*  📅 ${fmtDate(o.DocDate)}  💰 ${fmtMoney(o.DocTotal)}${fcLabel}`);
           o.lines.slice(0, 5).forEach(l => {
-            const qty = `${parseFloat(l.Quantity).toLocaleString('tr-TR')} ${l.Birim}`;
-            sec.push(`   • *${l.ItemCode}* ${String(l.ItemName).substring(0, 40)}\n     Miktar: ${qty}  ·  ${fmtMoney(l.LineTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+            const qty   = `${parseFloat(l.Quantity).toLocaleString('tr-TR')} ${l.Birim}`;
+            const fcAmt = (o.DocCur && o.DocCur !== 'TRY' && parseFloat(l.LineTotalFC) > 0)
+              ? `  (${fmtMoney(l.LineTotalFC, o.DocCur)})` : '';
+            sec.push(`   • *${l.ItemCode}* ${String(l.ItemName).substring(0, 40)}\n     Miktar: ${qty}  ·  ${fmtMoney(l.LineTotal)}${fcAmt}`);
           });
           if (o.lines.length > 5) sec.push(`   _... +${o.lines.length - 5} satır_`);
         });

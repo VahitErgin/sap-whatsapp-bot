@@ -954,6 +954,7 @@ async function getFaturaSatir({ docNum, cardCode, itemCode, docDate, top = 50, d
       CONVERT(VARCHAR(10), h.DocDate,    23) AS DocDate,
       CONVERT(VARCHAR(10), h.DocDueDate, 23) AS DocDueDate,
       h.DocTotal,
+      ISNULL(h.DocTotalFC, 0)                AS DocTotalFC,
       ISNULL(h.DocCur, 'TRY')                AS DocCur,
       l.LineNum,
       l.ItemCode,
@@ -962,6 +963,7 @@ async function getFaturaSatir({ docNum, cardCode, itemCode, docDate, top = 50, d
       ISNULL(l.UnitMsr, '')                  AS Birim,
       l.Price,
       l.LineTotal,
+      ISNULL(l.TotalFrgn, 0)                 AS LineTotalFC,
       CONVERT(VARCHAR(10), l.ShipDate, 23)   AS ShipDate
     FROM OINV h WITH(NOLOCK)
     INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
