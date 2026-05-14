@@ -917,6 +917,60 @@ async function getIrsaliyeSatir({ cardCode, itemCode, docDate, top = 50, dbName 
 }
 
 // ─────────────────────────────────────────────────────────────
+// Fatura Satır Detayı — OINV + INV1 (ürün/satır bazlı)
+//
+// docNum    → fatura numarası (opsiyonel — "72197 nolu fatura")
+// cardCode  → müşteri kodu (opsiyonel)
+// itemCode  → ürün kodu LIKE (opsiyonel)
+// docDate   → fatura tarihi (opsiyonel)
+// top       → kaç kayıt (default 50)
+// ─────────────────────────────────────────────────────────────
+async function getFaturaSatir({ docNum, cardCode, itemCode, docDate, top = 50, dbName }) {
+  const params     = { Top: Number(top) };
+  const conditions = ["h.CANCELED = 'N'"];
+
+  if (docNum) {
+    params.DocNum = parseInt(docNum);
+    conditions.push('h.DocNum = @DocNum');
+  }
+  if (cardCode) {
+    params.CardCode = cardCode;
+    conditions.push('h.CardCode = @CardCode');
+  }
+  if (itemCode) {
+    params.ItemCode = `%${itemCode}%`;
+    conditions.push('l.ItemCode LIKE @ItemCode');
+  }
+  if (docDate) {
+    params.DocDate = docDate;
+    conditions.push('CAST(h.DocDate AS DATE) = CAST(@DocDate AS DATE)');
+  }
+
+  return await execute(`
+    SELECT TOP (@Top)
+      h.DocNum,
+      h.CardCode,
+      h.CardName,
+      CONVERT(VARCHAR(10), h.DocDate,    23) AS DocDate,
+      CONVERT(VARCHAR(10), h.DocDueDate, 23) AS DocDueDate,
+      h.DocTotal,
+      ISNULL(h.DocCur, 'TRY')                AS DocCur,
+      l.LineNum,
+      l.ItemCode,
+      l.Dscription                           AS ItemName,
+      l.Quantity,
+      ISNULL(l.UnitMsr, '')                  AS Birim,
+      l.Price,
+      l.LineTotal,
+      CONVERT(VARCHAR(10), l.ShipDate, 23)   AS ShipDate
+    FROM OINV h WITH(NOLOCK)
+    INNER JOIN INV1 l WITH(NOLOCK) ON h.DocEntry = l.DocEntry
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY h.DocDate DESC, h.DocNum, l.LineNum
+  `, params, dbName);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Belirtilen tablodaki en son belge tarihini döndürür
 // tableName: OINV, ODLN, ORDR, OPOR, OPCH, ORIN, OITW …
 // Sonuç boş sorgularda "son kayıt: X tarihinde kesildi" bilgisi için kullanılır
@@ -1129,4 +1183,4 @@ async function getOclaStatuses({ dbName } = {}) {
   return rows.map(r => ({ Code: r[codeKey], Name: r[nameKey] }));
 }
 
-module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches, getOclaStatuses };
+module.exports = { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, getServisGuncellemeleri, resolveCardCode, getOnayBekleyenler, getOnayYetkilileri, getOnaylayanByPhone, getUserByPhone, getCustomerByPhone, getEmployeeByPhone, getAllOhemEmployees, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate, runRawQuery, searchPartners, searchItems, getPartnerInfo, getItemPrice, getAvailableSerials, getAvailableBatches, getOclaStatuses };

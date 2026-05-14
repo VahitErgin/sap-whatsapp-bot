@@ -22,7 +22,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config/config');
 const { getConnection }                             = require('./sapClient');
-const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getLastDocDate } = require('./sapDb');
+const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
@@ -211,6 +211,21 @@ Açık satış siparişleri ürün/satır bazlı detay (ORDR + RDR1):
               "hangi ürünler siparişte", "açık sipariş detayı", "sipariş satırları"
   KRİTİK: Orders endpoint + $expand KULLANMA — DocumentLines desteklenmez. Bu endpoint kullan.
   YASAK: İrsaliye / teslimat / sevk sorgularında KULLANMA — o sorgular için SQL_IRSALIYE_SATIR kullan.
+
+Fatura satır detayı — fatura kalemleri (OINV + INV1):
+  endpoint: "SQL_FATURA_SATIR"
+  params: {
+    "docNum":   "72197",         (opsiyonel - fatura numarası, "X nolu fatura" gibi sorgularda KULLAN)
+    "cardCode": "CARDCODE",      (opsiyonel - müşteri kodu)
+    "cardName": "ABC Firma",     (opsiyonel - isimden ara)
+    "itemCode": "ITEM001",       (opsiyonel - ürün kodu filtresi)
+    "docDate":  "YYYY-MM-DD",    (opsiyonel - fatura tarihi)
+    "top": "50"                  (opsiyonel - kaç satır, default 50)
+  }
+  → Kullanım: "X nolu fatura detayı", "fatura kalemleri", "faturanın içinde ne var",
+              "fatura satırları", "fatura ürünleri", "fatura içeriği"
+  KRİTİK: Invoices + $expand=DocumentLines ASLA KULLANMA — SAP SL desteklemiyor.
+          Fatura satır/detay sorguları için yalnızca bu endpoint kullan.
 
 İrsaliye satır detayı — sevk edilen / teslimata çıkan ürünler (ODLN + DLN1):
   endpoint: "SQL_IRSALIYE_SATIR"
@@ -421,7 +436,7 @@ async function handleQuery({ from, question, dbName, _skipFallback = false, lice
     if (customerCardCode && Array.isArray(plan.queries)) {
       plan.queries.forEach(q => {
         q.params = q.params || {};
-        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE', 'SQL_STOK_SERI', 'SQL_ACIK_SIPARIS', 'SQL_IRSALIYE_SATIR'].includes(q.endpoint)) {
+        if (['SQL_HIZMET', 'SQL_CARI_EKSTRE', 'SQL_STOK_SERI', 'SQL_ACIK_SIPARIS', 'SQL_IRSALIYE_SATIR', 'SQL_FATURA_SATIR'].includes(q.endpoint)) {
           q.params.cardCode = customerCardCode;
           delete q.params.cardName;
         } else if (q.method !== 'POST' && q.method !== 'PATCH') {
@@ -846,6 +861,17 @@ async function executeQueries(sl, queries, dbName) {
           dbName,
         });
         data = rows;
+      } else if (q.endpoint === 'SQL_FATURA_SATIR') {
+        // Direkt SQL: OINV + INV1 (fatura satır bazlı)
+        const rows = await getFaturaSatir({
+          docNum:   q.params.docNum   || null,
+          cardCode: q.params.cardCode || null,
+          itemCode: q.params.itemCode || null,
+          docDate:  q.params.docDate  || null,
+          top:      parseInt(q.params.top) || 50,
+          dbName,
+        });
+        data = rows;
       } else {
         // Service Layer (OData)
         const method = (q.method || 'GET').toUpperCase();
@@ -890,6 +916,7 @@ async function executeQueries(sl, queries, dbName) {
           const SQL_TABLE = {
             SQL_IRSALIYE_SATIR: 'ODLN',
             SQL_ACIK_SIPARIS:   'ORDR',
+            SQL_FATURA_SATIR:   'OINV',
           };
           if (q.params?.docDate && SQL_TABLE[q.endpoint]) {
             results[q.id].lastDate = await getLastDocDate({ tableName: SQL_TABLE[q.endpoint], cardCode, dbName });
@@ -1162,6 +1189,35 @@ function formatResultsLocal(_question, queries, results) {
           );
         });
         if (data.length > 8) sec.push(`_... ve ${data.length - 8} çağrı daha_`);
+      }
+
+    } else if (ep === 'SQL_FATURA_SATIR') {
+      if (!data.length) {
+        const lastNote = r.lastDate ? `\n📅 Son fatura: *${fmtDate(r.lastDate)}*` : '';
+        sec.push(`📭 *${r.description}*\nFatura satırı bulunamadı.${lastNote}`);
+      } else {
+        const byInv = {};
+        data.forEach(row => {
+          const key = row.DocNum;
+          if (!byInv[key]) {
+            byInv[key] = {
+              DocNum: row.DocNum, CardName: row.CardName, DocDate: row.DocDate,
+              DocDueDate: row.DocDueDate, DocTotal: row.DocTotal, DocCur: row.DocCur, lines: [],
+            };
+          }
+          byInv[key].lines.push(row);
+        });
+        const invs = Object.values(byInv);
+        sec.push(`🧾 *${r.description}* (${invs.length} fatura, ${data.length} satır)\n`);
+        invs.slice(0, 8).forEach(o => {
+          sec.push(`📋 *Fatura #${o.DocNum}* — *${o.CardName}*  📅 ${fmtDate(o.DocDate)}  💰 ${fmtMoney(o.DocTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+          o.lines.slice(0, 5).forEach(l => {
+            const qty = `${parseFloat(l.Quantity).toLocaleString('tr-TR')} ${l.Birim}`;
+            sec.push(`   • *${l.ItemCode}* ${String(l.ItemName).substring(0, 40)}\n     Miktar: ${qty}  ·  ${fmtMoney(l.LineTotal, o.DocCur !== 'TRY' ? o.DocCur : null)}`);
+          });
+          if (o.lines.length > 5) sec.push(`   _... +${o.lines.length - 5} satır_`);
+        });
+        if (invs.length > 8) sec.push(`_... ve ${invs.length - 8} fatura daha_`);
       }
 
     } else if (ep === 'SQL_IRSALIYE_SATIR') {
