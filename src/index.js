@@ -35,6 +35,16 @@ app.use(session({
 app.use('/admin', adminRouter);
 
 // ─────────────────────────────────────────────────────────────
+// GET /r/:code  → URL shortener redirect (e-belge linklerini kısaltır)
+// ─────────────────────────────────────────────────────────────
+const urlShortener = require('./services/urlShortener');
+app.get('/r/:code', (req, res) => {
+  const url = urlShortener.resolve(req.params.code);
+  if (!url) return res.status(404).type('text/plain').send('Link bulunamadı veya geçersiz.');
+  res.redirect(302, url);
+});
+
+// ─────────────────────────────────────────────────────────────
 // GET /webhook  → Meta'nın ilk doğrulama isteği (bir kere çalışır)
 // ─────────────────────────────────────────────────────────────
 app.get('/webhook', (req, res) => {

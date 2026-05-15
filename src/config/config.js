@@ -11,6 +11,10 @@ module.exports = {
   port: process.env.PORT || 3000,
   env: process.env.NODE_ENV || 'development',
 
+  // URL shortener için public base (örn: https://wa.endeks.com.tr)
+  // Boş bırakılırsa shortener relative path /r/code döner — uzaktan tıklanmaz.
+  publicUrl: process.env.PUBLIC_URL || '',
+
   whatsapp: {
     phoneNumberId:  required('WA_PHONE_NUMBER_ID'),
     wabaId:         process.env.WA_WABA_ID || '',   // WhatsApp Business Account ID (şablon yönetimi için)

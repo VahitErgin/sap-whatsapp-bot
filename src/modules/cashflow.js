@@ -25,6 +25,7 @@ const { getConnection }                             = require('./sapClient');
 const { getCariEkstre, getVadesiGecenler, getTahsilatlar, getBankaBakiye, getGlHesap, getHizmetDurumu, resolveCardCode, getSatisByKategori, getSatisByMarka, getSatisByTemsilci, getSatisByUrun, getStokSatissiz, getStokFiyatListesi, getStokSeriListesi, getAcikSiparisler, getIrsaliyeSatir, getFaturaSatir, getLastDocDate } = require('./sapDb');
 const { sendText, sendList, sendButtons } = require('../services/whatsappService');
 const { buildEdocUrl }               = require('../services/edocumentService');
+const { shorten: shortenUrl }        = require('../services/urlShortener');
 // FIX: support'tan askClaude import'u kaldırıldı (kullanılmıyordu, döngüsel bağımlılık riski)
 
 // ─── Dokümanları oku ──────────────────────────────────────────
@@ -1385,7 +1386,8 @@ function formatResultsLocal(_question, queries, results) {
           if (!line) return;
           let rowText = `• ${line}`;
           if (edocType && row.NumAtCard) {
-            const url = buildEdocUrl(edocType, row.NumAtCard);
+            const longUrl = buildEdocUrl(edocType, row.NumAtCard);
+            const url     = longUrl ? (shortenUrl(longUrl) || longUrl) : null;
             if (url) rowText += `\n  📄 ${url}`;
           }
           sec.push(rowText);

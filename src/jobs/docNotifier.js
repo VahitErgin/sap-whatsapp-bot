@@ -21,6 +21,7 @@ const path = require('path');
 const { execute }       = require('../modules/sapDbDriver');
 const { sendTemplate }  = require('../services/whatsappService');
 const { buildEdocUrl }  = require('../services/edocumentService');
+const { shorten }       = require('../services/urlShortener');
 const config            = require('../config/config');
 
 const STATE_FILE    = path.join(__dirname, '../../data/doc-notifier-state.json');
@@ -110,7 +111,8 @@ async function notify(doc, docType, state, dbName) {
   }
 
   // Görüntüleme URL — U_BE1_UUID, edoc-config.json'daki pattern kullanılır
-  const url = buildEdocUrl(docType, doc.UUID) || '';
+  const longUrl = buildEdocUrl(docType, doc.UUID) || '';
+  const url     = longUrl ? (shorten(longUrl) || longUrl) : '';
 
   // Para formatı
   const total = `${Number(doc.DocTotal || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${doc.DocCur || 'TRY'}`;
