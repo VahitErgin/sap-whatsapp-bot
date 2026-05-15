@@ -11,6 +11,7 @@ const { readEnv, updateEnv }               = require('./configService');
 const { readLogs }                         = require('../services/logService');
 const { readTasks, createTask, updateTask, deleteTask, TASK_TYPES } = require('../services/taskService');
 const { getEdocConfig, saveEdocConfig } = require('../services/edocumentService');
+const urlShortener = require('../services/urlShortener');
 const { getAllPrefs, setLang, deleteLang } = require('../services/langService');
 const { testConnection: graphTestConnection } = require('../services/graphService');
 const { getStats, addUser, updateUser, removeUser } = require('../services/userRegistry');
@@ -315,6 +316,28 @@ router.post('/api/edoc-settings', requireAuth, (req, res) => {
     eirsaliye: (eirsaliye || '').trim(),
   });
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// API – URL Shortener (kısa link yönetimi)
+// ─────────────────────────────────────────────────────────────
+router.get('/api/url-shortener', requireAuth, (_req, res) => {
+  res.json({
+    publicUrl: config.publicUrl || '',
+    items:     urlShortener.list(),
+  });
+});
+
+router.post('/api/url-shortener/public-url', requireAuth, (req, res) => {
+  const publicUrl = String(req.body?.publicUrl || '').trim().replace(/\/$/, '');
+  updateEnv({ PUBLIC_URL: publicUrl });
+  config.publicUrl = publicUrl;
+  res.json({ ok: true, publicUrl });
+});
+
+router.delete('/api/url-shortener/:code', requireAuth, (req, res) => {
+  const ok = urlShortener.remove(req.params.code);
+  res.json({ ok });
 });
 
 // ─────────────────────────────────────────────────────────────

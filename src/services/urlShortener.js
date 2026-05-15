@@ -92,4 +92,33 @@ function resolve(code) {
   return entry.url;
 }
 
-module.exports = { shorten, resolve };
+/**
+ * Admin panel için: tüm kısa URL'leri listele (yeni → eski sırayla)
+ */
+function list() {
+  const db = _load();
+  return Object.entries(db.byCode)
+    .map(([code, entry]) => ({
+      code,
+      url:     entry.url,
+      ts:      entry.ts || null,
+      hits:    entry.hits || 0,
+      lastHit: entry.lastHit || null,
+    }))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+
+/**
+ * Admin panel için: bir kısa URL'i sil
+ */
+function remove(code) {
+  const db = _load();
+  const entry = db.byCode[code];
+  if (!entry) return false;
+  delete db.byCode[code];
+  if (db.byUrl[entry.url] === code) delete db.byUrl[entry.url];
+  _save();
+  return true;
+}
+
+module.exports = { shorten, resolve, list, remove };
