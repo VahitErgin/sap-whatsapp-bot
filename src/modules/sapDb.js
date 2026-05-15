@@ -958,6 +958,8 @@ async function getGlHesap({ acctPrefix, startDate, endDate, refDate, dbName }) {
     WHERE (oa.AcctCode LIKE @AcctPrefix OR ISNULL(oa.FormatCode, '') LIKE @AcctPrefix)
       ${dateCondition}
     GROUP BY oa.AcctCode, oa.FormatCode, oa.AcctName, j.FCCurrency
+    HAVING ABS(SUM(ISNULL(j.Debit,   0)) - SUM(ISNULL(j.Credit,   0))) > 0.01
+        OR ABS(SUM(ISNULL(j.FCDebit, 0)) - SUM(ISNULL(j.FCCredit, 0))) > 0.01
     ORDER BY oa.AcctCode, Para
   `, params, dbName);
 }

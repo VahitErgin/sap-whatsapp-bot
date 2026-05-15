@@ -1230,7 +1230,12 @@ function formatResultsLocal(_question, queries, results) {
           byAcct[key].satirlar.push(row);
           byAcct[key].hareket += Number(row.HareketSayisi) || 0;
         });
-        const accts = Object.values(byAcct);
+        // Mutlak bakiyeye göre büyükten küçüğe sırala (en yüksek tutarlar önce)
+        const accts = Object.values(byAcct).sort((a, b) => {
+          const sa = a.satirlar.reduce((s, r) => s + Math.abs(Number(r.Bakiye) || 0), 0);
+          const sb = b.satirlar.reduce((s, r) => s + Math.abs(Number(r.Bakiye) || 0), 0);
+          return sb - sa;
+        });
 
         // Toplam (tüm hesaplar): TRY + para birimi bazlı FC
         let totTRY = 0;
