@@ -127,6 +127,35 @@
   </div>
 </div>
 
+<!-- Log Detay Modal -->
+<div class="modal fade" id="logDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-journal-text me-2"></i>Log Detayı</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 mb-3" style="font-size:.85rem">
+          <div class="col-md-4"><strong>Zaman:</strong> <span id="detailTs"></span></div>
+          <div class="col-md-4"><strong>Telefon:</strong> <span id="detailPhone" style="font-family:monospace"></span></div>
+          <div class="col-md-4"><strong>Yön / Tip:</strong> <span id="detailDirType"></span></div>
+        </div>
+        <hr>
+        <div class="mb-2"><strong>Mesaj:</strong></div>
+        <pre id="detailMsg" style="background:#f5f5f5;padding:.75rem;border-radius:.4rem;white-space:pre-wrap;word-break:break-word;font-size:.85rem;max-height:50vh;overflow:auto;border:1px solid #e0e0e0"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" id="copyBtn">
+          <i class="bi bi-clipboard me-1"></i>Mesajı Kopyala
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let _allRows = [];
 
@@ -204,10 +233,14 @@ function renderTable(rows) {
       msgCell = `<span title="Çift tıkla → kopyala" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:480px">${esc(fullText)}</span>`;
     }
 
-    tr.style.cursor = 'pointer';
-    tr.dataset.msg  = fullText;
-    tr.title        = 'Çift tıkla → mesajı panoya kopyala';
-    tr.addEventListener('dblclick', () => copyRowMsg(tr));
+    tr.style.cursor   = 'pointer';
+    tr.dataset.msg    = fullText;
+    tr.dataset.ts     = r.ts || '';
+    tr.dataset.phone  = r.phone || '';
+    tr.dataset.dir    = r.dir || '';
+    tr.dataset.type   = r.type || '';
+    tr.title          = 'Çift tıkla → tam mesajı detaylı gör';
+    tr.addEventListener('dblclick', () => showRowDetail(tr));
 
     tr.innerHTML = `
       <td class="text-muted">${fmtTs(r.ts)}</td>
@@ -260,36 +293,47 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ─── Çift tıkla mesajı panoya kopyala ──────────────────────────
-async function copyRowMsg(tr) {
-  const text = tr.dataset.msg || '';
-  if (!text) return;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      // HTTPS olmayan / eski tarayıcı fallback'i
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity  = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    flashRow(tr, '#d4edda'); // yeşil
-  } catch (err) {
-    console.error('Kopyalama hatası:', err);
-    flashRow(tr, '#f8d7da'); // kırmızı
-  }
-}
+// ─── Çift tıkla → modal'da detayı göster ───────────────────────
+let _detailModal = null;
+function showRowDetail(tr) {
+  const text  = tr.dataset.msg || '(boş)';
+  const ts    = tr.dataset.ts;
+  const phone = tr.dataset.phone || '—';
+  const dir   = tr.dataset.dir === 'in' ? 'Gelen' : 'Giden';
+  const type  = tr.dataset.type || 'text';
 
-function flashRow(tr, color) {
-  const orig = tr.style.backgroundColor;
-  tr.style.transition      = 'background-color .15s ease';
-  tr.style.backgroundColor = color;
-  setTimeout(() => { tr.style.backgroundColor = orig; }, 500);
+  document.getElementById('detailTs').textContent      = ts ? fmtTs(ts) : '—';
+  document.getElementById('detailPhone').textContent   = phone;
+  document.getElementById('detailDirType').textContent = `${dir} · ${type}`;
+  document.getElementById('detailMsg').textContent     = text;
+
+  // Kopyala butonu — her açılışta yeniden bağla
+  const btn = document.getElementById('copyBtn');
+  btn.onclick = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Kopyalandı';
+      btn.classList.remove('btn-primary'); btn.classList.add('btn-success');
+      setTimeout(() => {
+        btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>Mesajı Kopyala';
+        btn.classList.remove('btn-success'); btn.classList.add('btn-primary');
+      }, 1200);
+    } catch (err) {
+      console.error('Kopyalama hatası:', err);
+      btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Hata';
+    }
+  };
+
+  if (!_detailModal) {
+    _detailModal = new bootstrap.Modal(document.getElementById('logDetailModal'));
+  }
+  _detailModal.show();
 }
 </script>
 <script src="/admin/admin-i18n.js"></script>
